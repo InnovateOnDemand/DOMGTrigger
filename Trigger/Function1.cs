@@ -21,23 +21,28 @@ namespace Trigger
           }
 
           [FunctionName("Function1")]
-          public static async Task Run([TimerTrigger("0 40 3 * * *")] TimerInfo myTimer, ILogger log)
+          public static async Task Run([TimerTrigger("0 0 15 * * *")] TimerInfo myTimer, ILogger log)
           {
-               HttpClient client = new HttpClient();
 
-			string baseUrl = "https://omgdev.azurewebsites.net/api/";
+			log.LogInformation($"Upload process starts at {DateTime.Now.ToString("hh:mm:ss")}...");
+			HttpClient client = new HttpClient();
+
 			string logsUrl = "https://omgdev.azurewebsites.net/api/Logs/Create";
 
 			string[] urls = new string[]{
-				$"{baseUrl}DataFiles/UpdateHoldRecords",
-				$"{baseUrl}DataFiles/DataFileUpload"
+				$"https://omgdev.azurewebsites.net/DataFiles/UpdateHoldRecords",
+				$"https://omgdev.azurewebsites.net/DataFiles/DataFileUpload"
 			};
 
                foreach (var url in urls)
-               {
-			     HttpResponseMessage response = await client.GetAsync(baseUrl + url);
+			{
+				log.LogInformation($"Calling URL {url} at {DateTime.Now.ToString("hh:mm:ss")}...");
+				HttpResponseMessage response = await client.GetAsync(url);
                     var stringRes = await response.Content.ReadAsStringAsync();
-				await client.PostAsJsonAsync(logsUrl, new Log(stringRes));
+
+                    string logMessage = $"URL {url} called with result: {stringRes}";
+				await client.PostAsJsonAsync(logsUrl, new Log(logMessage));
+                    log.LogInformation(logMessage);
 			}
 		}
      }
