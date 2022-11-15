@@ -16,17 +16,22 @@ namespace Trigger
           }
 
           [FunctionName("Function1")]
-          public static async Task Run([TimerTrigger("0 0 */7 * * *")] TimerInfo myTimer, ILogger log)
+          public static async Task Run([TimerTrigger("0 30 3 * * *")] TimerInfo myTimer, ILogger log)
           {
                HttpClient client = new HttpClient();
 
-               string url = "https://omgdev.azurewebsites.net/api/Logs/Create";
+               string baseUrl = "https://omgdev.azurewebsites.net/api/";
 
-			HttpResponseMessage response = await client. PostAsJsonAsync(url, new Log { 
-                    Message = "Log message from the trigger function " + DateTime.Now.ToString("hh:mm:ss") 
-               });
+			string[] urls = new string[]{
+				$"{baseUrl}DataFiles/UpdateHoldRecords",
+				$"{baseUrl}DataFiles/DataFileUpload"
+			};
 
-               log.LogInformation(await response.Content.ReadAsStringAsync());
+               foreach (var url in urls)
+               {
+			     HttpResponseMessage response = await client.GetAsync(baseUrl + url);
+                    log.LogInformation(await response.Content.ReadAsStringAsync());                    
+               }
 		}
      }
 }
