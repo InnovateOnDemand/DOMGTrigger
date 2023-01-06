@@ -30,29 +30,32 @@ namespace Trigger
 			     log.LogInformation($"Upload process starts at {DateTime.Now.ToString("hh:mm:ss")}...");
 			     HttpClient client = new HttpClient();
 
-			     string baseUrl = "https://omgdev.azurewebsites.net/";
+			     string[] baseUrls = new string[] { "https://omgdev.azurewebsites.net/", "https://omgprod.azurewebsites.net/" };
 			     string logsUrl = "https://omgdev.azurewebsites.net/api/Logs/Create";
 
-                    var urls = new Dictionary<string, string>();
-			     urls.Add("GET", $"{baseUrl}DataFiles/UpdateHoldRecords");
-			     urls.Add("POST", $"{baseUrl}DataFiles/DataFileUpload");
+                    foreach (var baseUrl in baseUrls)
+                    {
+                         var urls = new Dictionary<string, string>();
+			          urls.Add("GET", $"{baseUrl}DataFiles/UpdateHoldRecords");
+			          urls.Add("POST", $"{baseUrl}DataFiles/DataFileUpload");
 
-			     foreach (var url in urls)
-			     {
-                         HttpResponseMessage response = url.Key == "GET" ? await client.GetAsync(url.Value) : await client.PostAsJsonAsync(url.Value, new{});
+			          foreach (var url in urls)
+			          {
+                              HttpResponseMessage response = url.Key == "GET" ? await client.GetAsync(url.Value) : await client.PostAsJsonAsync(url.Value, new{});
 
-                         if (response.StatusCode != HttpStatusCode.OK)
-                         {
-					     log.LogError($"There was an error on the call");
-				     }
-                         else
-                         {
-                              var stringRes = await response.Content.ReadAsStringAsync();
-                              string logMessage = $"URL {url} called with result: {stringRes}";
-				          await client.PostAsJsonAsync(logsUrl, new Log(logMessage));
-                              log.LogInformation(logMessage);
-                         }
-			     }
+                              if (response.StatusCode != HttpStatusCode.OK)
+                              {
+					          log.LogError($"There was an error on the call");
+				          }
+                              else
+                              {
+                                   var stringRes = await response.Content.ReadAsStringAsync();
+                                   string logMessage = $"URL {url} called with result: {stringRes}";
+				               await client.PostAsJsonAsync(logsUrl, new Log(logMessage));
+                                   log.LogInformation(logMessage);
+                              }
+			          }
+                    }
                }
                catch (Exception ex)
                {
