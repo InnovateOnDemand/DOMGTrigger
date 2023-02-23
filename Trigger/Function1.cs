@@ -23,7 +23,7 @@ namespace Trigger
           }
 
           [FunctionName("Function1")]
-          public static async Task Run([TimerTrigger("0 0 15 * * *")] TimerInfo myTimer, ILogger log)
+          public static async Task Run([TimerTrigger("0 0 8 * * *")] TimerInfo myTimer, ILogger log)
           {
                try
                {
