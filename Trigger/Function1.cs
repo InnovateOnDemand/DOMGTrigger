@@ -29,8 +29,9 @@ namespace Trigger
                {
 			     log.LogInformation($"Upload process starts at {DateTime.Now.ToString("hh:mm:ss")}...");
 			     HttpClient client = new HttpClient();
+                 client.Timeout = TimeSpan.FromMinutes(10);
 
-			     string[] baseUrls = new string[] { "https://omgdev.azurewebsites.net/", "https://omgprod.azurewebsites.net/" };
+                 string[] baseUrls = new string[] { "https://omgdev.azurewebsites.net/", "https://omgprod.azurewebsites.net/" };
 			     string logsUrl = "https://omgdev.azurewebsites.net/api/Logs/Create";
 
                     foreach (var baseUrl in baseUrls)
