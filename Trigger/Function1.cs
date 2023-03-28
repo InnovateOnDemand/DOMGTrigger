@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -22,47 +23,82 @@ namespace Trigger
                public string Message { get; set; }
           }
 
-          [FunctionName("Function1")]
-          public static async Task Run([TimerTrigger("0 0 8 * * *")] TimerInfo myTimer, ILogger log)
+          public class Dealer
           {
-               try
-               {
-			     log.LogInformation($"Upload process starts at {DateTime.Now.ToString("hh:mm:ss")}...");
-			     HttpClient client = new HttpClient();
-                 client.Timeout = TimeSpan.FromMinutes(10);
+              public string dealerID { get; set; }
+              public string dataProviderID { get; set; }
+          }
 
-                 string[] baseUrls = new string[] { "https://omgdev.azurewebsites.net/", "https://omgprod.azurewebsites.net/" };
-			     string logsUrl = "https://omgdev.azurewebsites.net/api/Logs/Create";
+          [FunctionName("Function1")]
+          public static async Task Run([TimerTrigger("0 */10 8-9 * * *")] TimerInfo myTimer, ILogger log)          
+          {
+            log.LogInformation($"Upload process starts at {DateTime.Now.ToString("hh:mm:ss")}...");
+            try
+            {                
+                HttpClient client = new HttpClient();
+                client.Timeout = TimeSpan.FromMinutes(10);
 
-                    foreach (var baseUrl in baseUrls)
+                //string[] baseUrls = new string[] { "https://omgdev.azurewebsites.net/", "https://omgprod.azurewebsites.net/" };
+                string baseUrl = "https://omgdev.azurewebsites.net/";
+                string logsUrl = $"{baseUrl}api/Logs/Create";
+
+                //Call the endpoint to get all the dealers without processing finished today
+                HttpResponseMessage dealersResponse = await client.GetAsync($"{baseUrl}DealersWithoutUploadProcessToday");
+
+                if (dealersResponse.StatusCode != HttpStatusCode.OK)
+                {
+                    log.LogError($"There was an error on the call to api/DealersWithoutUploadProcessToday");
+                }
+                else
+                {
+                    var dealersJson = await dealersResponse.Content.ReadAsStringAsync();
+                    var dealers = JsonConvert.DeserializeObject<List<Dealer>>(dealersJson);
+
+                    if (dealers.Count > 0)
                     {
-                         var urls = new Dictionary<string, string>();
-			          urls.Add("GET", $"{baseUrl}DataFiles/UpdateHoldRecords");
-			          urls.Add("POST", $"{baseUrl}DataFiles/DataFileUpload");
+                        var urlUpdateHoldRecords = $"{baseUrl}DataFiles/UpdateHoldRecords";
+                        HttpResponseMessage firstResponse = await client.GetAsync(urlUpdateHoldRecords);
+                        if (firstResponse.StatusCode != HttpStatusCode.OK)
+                        {
+                            log.LogError($"There was an error on the call to the EndPoint: DataFiles/UpdateHoldRecords");
+                        }
+                        else
+                        {
+                            var stringRes = await firstResponse.Content.ReadAsStringAsync();
+                            string logMessage = $"EndPoint: DataFiles/UpdateHoldRecords called with result: {stringRes}";
+                            await client.PostAsJsonAsync(logsUrl, new Log(logMessage));
+                            log.LogInformation(logMessage);
+                        }
 
-			          foreach (var url in urls)
-			          {
-                              HttpResponseMessage response = url.Key == "GET" ? await client.GetAsync(url.Value) : await client.PostAsJsonAsync(url.Value, new{});
+                        foreach (var dealer in dealers)
+                        {
+                            var url = $"{baseUrl}DataFiles/DataFileUpload?DataProviderID={dealer.dataProviderID}&dealerIds={dealer.dealerID}";
 
-                              if (response.StatusCode != HttpStatusCode.OK)
-                              {
-					          log.LogError($"There was an error on the call");
-				          }
-                              else
-                              {
-                                   var stringRes = await response.Content.ReadAsStringAsync();
-                                   string logMessage = $"URL {url} called with result: {stringRes}";
-				               await client.PostAsJsonAsync(logsUrl, new Log(logMessage));
-                                   log.LogInformation(logMessage);
-                              }
-			          }
+                            HttpResponseMessage response = await client.PostAsJsonAsync(url, new { });
+
+                            if (response.StatusCode != HttpStatusCode.OK)
+                            {
+                                log.LogError($"There was an error on the call");
+                            }
+                            else
+                            {
+                                var stringRes = await response.Content.ReadAsStringAsync();
+                                string logMessage = $"Upload Information Process called with result: {stringRes} for Dealer: {dealer.dealerID} and DataProvider: {dealer.dataProviderID} ";
+                                await client.PostAsJsonAsync(logsUrl, new Log(logMessage));
+                                log.LogInformation(logMessage);
+                            }
+                        }
                     }
-               }
-               catch (Exception ex)
+                    else
+                    {
+                        log.LogInformation("No more dealers pending to upload...");
+                    }
+                }
+            }
+            catch (Exception ex)
                {
-				log.LogError(ex.Message);
+			        log.LogError(ex.Message);
                }
-
 		}
      }
 }
