@@ -30,7 +30,7 @@ namespace Trigger
           }
 
           [FunctionName("Function1")]
-          public static async Task Run([TimerTrigger("0 */10 12-14 * * *")] TimerInfo myTimer, ILogger log)          
+          public static async Task Run([TimerTrigger("0 */10 13-15 * * *")] TimerInfo myTimer, ILogger log)          
           {
             log.LogInformation($"Upload process starts at {DateTime.Now.ToString("hh:mm:ss")}...");
             try
@@ -40,7 +40,7 @@ namespace Trigger
 
                 //string[] baseUrls = new string[] { "https://omgdev.azurewebsites.net/", "https://omgprod.azurewebsites.net/" };
                 string baseUrl = "https://omgdev.azurewebsites.net/";
-                if (DateTime.Now.Hour == 12)
+                if (DateTime.Now.Hour == 13)
                 {
                     baseUrl = "https://omgprod.azurewebsites.net/";
                     log.LogInformation("Processing records for the Production Environment");
