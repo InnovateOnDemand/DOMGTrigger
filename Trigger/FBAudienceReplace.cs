@@ -23,7 +23,7 @@ namespace Trigger
     {
         [FunctionName("ReplaceFacebookAudienceFunction")]
         public static async Task<IActionResult> Run(
-            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)]
+            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = null)]
             HttpRequest req,
             ILogger log)
         {
@@ -33,75 +33,77 @@ namespace Trigger
             // Tomamos el connection string de Storage desde variables de entorno
             string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
 
-            try
+            // 1. Leer payload del body
+            string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+            var payload = JsonConvert.DeserializeObject<ReplaceAudiencePayload>(requestBody);
+
+            _ = Task.Run(async () =>
             {
-                log.LogInformation("===== ReplaceFacebookAudienceFunction START =====");
-
-                // 1. Leer payload del body
-                string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-                var payload = JsonConvert.DeserializeObject<ReplaceAudiencePayload>(requestBody);
-
-                // Validaciones mínimas
-                if (string.IsNullOrEmpty(payload.AudienceId) ||
-                    string.IsNullOrEmpty(payload.FacebookAccessToken) ||
-                    string.IsNullOrEmpty(payload.ContainerName) ||
-                    payload.BlobPaths == null || payload.BlobPaths.Count == 0)
+                try
                 {
-                    return new BadRequestObjectResult("Faltan datos en el payload (AudienceId, FacebookAccessToken, ContainerName, BlobPaths).");
-                }
+                    log.LogInformation("===== ReplaceFacebookAudienceFunction START =====");
 
-                string audienceId = payload.AudienceId;
-                string fbAccessToken = payload.FacebookAccessToken;
-                string containerName = payload.ContainerName;
-                var blobPaths = payload.BlobPaths;
-
-                log.LogInformation($"Replace audienceId: {audienceId}, containerName: {containerName}, totalBlobs: {blobPaths.Count}");
-
-                // 2. Descargamos y combinamos TODOS los datos en una sola lista
-                var allCustomers = new List<Dictionary<string, object>>();
-
-                BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
-                BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(containerName);
-
-                foreach (var blobPath in blobPaths)
-                {
-                    var blobClient = containerClient.GetBlobClient(blobPath);
-
-                    if (!await blobClient.ExistsAsync())
+                    // Validaciones mínimas
+                    if (string.IsNullOrEmpty(payload.AudienceId) ||
+                        string.IsNullOrEmpty(payload.FacebookAccessToken) ||
+                        string.IsNullOrEmpty(payload.ContainerName) ||
+                        payload.BlobPaths == null || payload.BlobPaths.Count == 0)
                     {
-                        log.LogWarning($"El blob {blobPath} no existe. Se omite.");
-                        continue;
+                        return new BadRequestObjectResult("Faltan datos en el payload (AudienceId, FacebookAccessToken, ContainerName, BlobPaths).");
                     }
 
-                    // Descargar contenido
-                    var downloadResult = await blobClient.DownloadContentAsync();
-                    var jsonContent = downloadResult.Value.Content.ToString();
+                    string audienceId = payload.AudienceId;
+                    string fbAccessToken = payload.FacebookAccessToken;
+                    string containerName = payload.ContainerName;
+                    var blobPaths = payload.BlobPaths;
 
-                    // Deserializa
-                    var customersChunk = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(jsonContent);
-                    if (customersChunk != null && customersChunk.Count > 0)
-                    {
-                        allCustomers.AddRange(customersChunk);
-                    }
-                }
+                    log.LogInformation($"Replace audienceId: {audienceId}, containerName: {containerName}, totalBlobs: {blobPaths.Count}");
 
-                if (allCustomers.Count == 0)
-                {
-                    log.LogWarning("No se encontró data de clientes en los blobs (o estaban vacíos).");
-                    // Eliminamos blobs y salimos
+                    // 2. Descargamos y combinamos TODOS los datos en una sola lista
+                    var allCustomers = new List<Dictionary<string, object>>();
+
+                    BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
+                    BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+
                     foreach (var blobPath in blobPaths)
                     {
-                        await containerClient.GetBlobClient(blobPath)
-                            .DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots);
+                        var blobClient = containerClient.GetBlobClient(blobPath);
+
+                        if (!await blobClient.ExistsAsync())
+                        {
+                            log.LogWarning($"El blob {blobPath} no existe. Se omite.");
+                            continue;
+                        }
+
+                        // Descargar contenido
+                        var downloadResult = await blobClient.DownloadContentAsync();
+                        var jsonContent = downloadResult.Value.Content.ToString();
+
+                        // Deserializa
+                        var customersChunk = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(jsonContent);
+                        if (customersChunk != null && customersChunk.Count > 0)
+                        {
+                            allCustomers.AddRange(customersChunk);
+                        }
                     }
-                    return new OkObjectResult("No customer data found to replace.");
-                }
 
-                // 3. Preparamos la llamada a /usersreplace? en UNA sola sesión
-                string replaceUsersApiUrl = $"https://graph.facebook.com/v20.0/{audienceId}/usersreplace?access_token={fbAccessToken}";
+                    if (allCustomers.Count == 0)
+                    {
+                        log.LogWarning("No se encontró data de clientes en los blobs (o estaban vacíos).");
+                        // Eliminamos blobs y salimos
+                        foreach (var blobPath in blobPaths)
+                        {
+                            await containerClient.GetBlobClient(blobPath)
+                                .DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots);
+                        }
+                        return new OkObjectResult("No customer data found to replace.");
+                    }
 
-                // Diccionario para acumular resultados
-                var audienceUpdates = new Dictionary<string, object>
+                    // 3. Preparamos la llamada a /usersreplace? en UNA sola sesión
+                    string replaceUsersApiUrl = $"https://graph.facebook.com/v20.0/{audienceId}/usersreplace?access_token={fbAccessToken}";
+
+                    // Diccionario para acumular resultados
+                    var audienceUpdates = new Dictionary<string, object>
                 {
                     { "session_id", "" },
                     { "num_received", 0 },
@@ -109,101 +111,104 @@ namespace Trigger
                     { "invalid_entry_samples", new JArray() }
                 };
 
-                // Mismo sessionId para TODOS los sub-lotes
-                long sessionId = GenerateUniqueSessionId();
+                    // Mismo sessionId para TODOS los sub-lotes
+                    long sessionId = GenerateUniqueSessionId();
 
-                // 4. Llamadas en sub-lotes (batch_seq incrementa)
-                int chunkSize = 5000;
-                int batchSeq = 1;
+                    // 4. Llamadas en sub-lotes (batch_seq incrementa)
+                    int chunkSize = 5000;
+                    int batchSeq = 1;
 
-                using (var httpClient = new HttpClient())
-                {
-                    for (int i = 0; i < allCustomers.Count; i += chunkSize)
+                    using (var httpClient = new HttpClient())
                     {
-                        // Sub-lote
-                        var subChunk = allCustomers.Skip(i).Take(chunkSize).ToList();
-
-                        // Preparar data
-                        var dataForFacebook = PrepareDataForFacebook(subChunk);
-
-                        var payloadData = new
+                        for (int i = 0; i < allCustomers.Count; i += chunkSize)
                         {
-                            schema = new[]
+                            // Sub-lote
+                            var subChunk = allCustomers.Skip(i).Take(chunkSize).ToList();
+
+                            // Preparar data
+                            var dataForFacebook = PrepareDataForFacebook(subChunk);
+
+                            var payloadData = new
                             {
+                                schema = new[]
+                                {
                                 "EMAIL", "EMAIL", "EMAIL",
                                 "PHONE", "PHONE", "PHONE",
                                 "FN", "LN", "ZIP",
                                 "CT", "ST", "COUNTRY",
                                 "DOBY", "GEN"
                             },
-                            data = dataForFacebook
-                        };
+                                data = dataForFacebook
+                            };
 
-                        bool isLastBatch = (i + chunkSize >= allCustomers.Count);
+                            bool isLastBatch = (i + chunkSize >= allCustomers.Count);
 
-                        var sessionObj = new
-                        {
-                            session_id = sessionId,
-                            batch_seq = batchSeq,
-                            last_batch_flag = isLastBatch,
-                            estimated_num_total = allCustomers.Count
-                        };
-
-                        using (var content = new MultipartFormDataContent())
-                        {
-                            content.Add(new StringContent(JsonConvert.SerializeObject(payloadData)), "payload");
-                            content.Add(new StringContent(JsonConvert.SerializeObject(sessionObj)), "session");
-
-                            // Invocar Facebook
-                            var response = await httpClient.PostAsync(replaceUsersApiUrl, content);
-                            if (!response.IsSuccessStatusCode)
+                            var sessionObj = new
                             {
-                                var errorContent = await response.Content.ReadAsStringAsync();
-                                throw new HttpRequestException($"Facebook API Error: {errorContent}");
+                                session_id = sessionId,
+                                batch_seq = batchSeq,
+                                last_batch_flag = isLastBatch,
+                                estimated_num_total = allCustomers.Count
+                            };
+
+                            using (var content = new MultipartFormDataContent())
+                            {
+                                content.Add(new StringContent(JsonConvert.SerializeObject(payloadData)), "payload");
+                                content.Add(new StringContent(JsonConvert.SerializeObject(sessionObj)), "session");
+
+                                // Invocar Facebook
+                                var response = await httpClient.PostAsync(replaceUsersApiUrl, content);
+                                if (!response.IsSuccessStatusCode)
+                                {
+                                    var errorContent = await response.Content.ReadAsStringAsync();
+                                    throw new HttpRequestException($"Facebook API Error: {errorContent}");
+                                }
+
+                                var responseContent = await response.Content.ReadAsStringAsync();
+                                var result = JsonConvert.DeserializeObject<JObject>(responseContent);
+
+                                // Actualizar contadores
+                                audienceUpdates["session_id"] = result["session_id"]?.ToString();
+                                audienceUpdates["num_received"] = (int)audienceUpdates["num_received"] + (int)result["num_received"];
+                                audienceUpdates["num_invalid_entries"] = (int)audienceUpdates["num_invalid_entries"] + (int)result["num_invalid_entries"];
+                                ((JArray)audienceUpdates["invalid_entry_samples"]).Merge(result["invalid_entry_samples"]);
                             }
 
-                            var responseContent = await response.Content.ReadAsStringAsync();
-                            var result = JsonConvert.DeserializeObject<JObject>(responseContent);
-
-                            // Actualizar contadores
-                            audienceUpdates["session_id"] = result["session_id"]?.ToString();
-                            audienceUpdates["num_received"] = (int)audienceUpdates["num_received"] + (int)result["num_received"];
-                            audienceUpdates["num_invalid_entries"] = (int)audienceUpdates["num_invalid_entries"] + (int)result["num_invalid_entries"];
-                            ((JArray)audienceUpdates["invalid_entry_samples"]).Merge(result["invalid_entry_samples"]);
+                            batchSeq++;
                         }
-
-                        batchSeq++;
                     }
+
+                    // 5. Borrar blobs asociados
+                    log.LogInformation("Eliminando blobs asociados a la audiencia...");
+                    foreach (var blobPath in blobPaths)
+                    {
+                        var blobClient = containerClient.GetBlobClient(blobPath);
+                        await blobClient.DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots);
+                    }
+
+                    // 6. Notificar por correo
+                    var summary = $"num_received: {audienceUpdates["num_received"]}, " +
+                                  $"num_invalid_entries: {audienceUpdates["num_invalid_entries"]}";
+                    await SendMail(notificationEmail,
+                        "Reemplazo de audiencia completado",
+                        $"Se ha completado el proceso de REPLACE para la audiencia {audienceId}.\n{summary}");
+
+                    log.LogInformation("===== ReplaceFacebookAudienceFunction END =====");
+
+                    return new OkObjectResult(audienceUpdates);
                 }
-
-                // 5. Borrar blobs asociados
-                log.LogInformation("Eliminando blobs asociados a la audiencia...");
-                foreach (var blobPath in blobPaths)
+                catch (Exception ex)
                 {
-                    var blobClient = containerClient.GetBlobClient(blobPath);
-                    await blobClient.DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots);
+                    // Manejo de error: intentar limpiar blobs y notificar
+                    await HandleErrorAndCleanUpBlobs(ex, req);
+                    return new ObjectResult($"Error en ReplaceFacebookAudienceFunction: {ex.Message}")
+                    {
+                        StatusCode = StatusCodes.Status500InternalServerError
+                    };
                 }
+            });
 
-                // 6. Notificar por correo
-                var summary = $"num_received: {audienceUpdates["num_received"]}, " +
-                              $"num_invalid_entries: {audienceUpdates["num_invalid_entries"]}";
-                await SendMail(notificationEmail,
-                    "Reemplazo de audiencia completado",
-                    $"Se ha completado el proceso de REPLACE para la audiencia {audienceId}.\n{summary}");
-
-                log.LogInformation("===== ReplaceFacebookAudienceFunction END =====");
-
-                return new OkObjectResult(audienceUpdates);
-            }
-            catch (Exception ex)
-            {
-                // Manejo de error: intentar limpiar blobs y notificar
-                await HandleErrorAndCleanUpBlobs(ex, req);
-                return new ObjectResult($"Error en ReplaceFacebookAudienceFunction: {ex.Message}")
-                {
-                    StatusCode = StatusCodes.Status500InternalServerError
-                };
-            }
+            return new AcceptedResult();
         }
 
         // En caso de error, intentamos re-leer el payload para saber los blobs que limpiar.
