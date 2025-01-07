@@ -28,7 +28,6 @@ namespace Trigger
 
             // 1. Deserializar el mensaje
             var payload = JsonConvert.DeserializeObject<ExtractAudiencePayload>(message);
-            log.LogInformation("Deserialized successfully");
 
             // 2. Extraer data de BigQuery
             var customerData = GetCustomerDataFromBigQuery(
@@ -79,7 +78,6 @@ namespace Trigger
             await queueClient.SendMessageAsync(nextJson);
 
             log.LogInformation($"Message enqueued to {nextQueueName}. Done extraction.");
-
         }
 
         private static List<Dictionary<string, object>> GetCustomerDataFromBigQuery(
