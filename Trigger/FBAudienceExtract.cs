@@ -11,6 +11,7 @@ using Google.Cloud.BigQuery.V2;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Queues;
+using System.Text;
 namespace Trigger
 {
     public static class FBAudienceExtract
@@ -61,7 +62,8 @@ namespace Trigger
                 BlobPaths = blobPaths
             };
             string nextJson = JsonConvert.SerializeObject(nextPayload);
-            await queueClient.SendMessageAsync(nextJson);
+            string nextJsonBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(nextJson));
+            await queueClient.SendMessageAsync(nextJsonBase64);
             log.LogInformation($"Message enqueued to {nextQueueName}. Done extraction.");
         }
         private static List<Dictionary<string, object>> GetCustomerDataFromBigQuery(
