@@ -293,7 +293,7 @@ namespace Trigger
         }
 
         [FunctionName("ReplaceFacebookAudienceQueue")]
-        public static async Task Run(
+        public static async Task RunQueue(
             [QueueTrigger("replace-queue", Connection = "AzureWebJobsStorage")]
             string message,
             ILogger log)

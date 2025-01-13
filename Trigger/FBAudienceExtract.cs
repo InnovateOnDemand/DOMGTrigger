@@ -16,7 +16,7 @@ namespace Trigger
     public static class FBAudienceExtract
     {
         [FunctionName("ExtractBigQueryDataQueue")]
-        public static async Task Run(
+        public static async Task RunQueue(
             [QueueTrigger("extract-queue", Connection = "AzureWebJobsStorage")]
             string message,
             ILogger log)

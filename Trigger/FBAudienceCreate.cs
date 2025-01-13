@@ -281,7 +281,7 @@ namespace Trigger
         /// Queue to Populate FB audiences.
         /// </summary>
         [FunctionName("PopulateFacebookAudienceQueue")]
-        public static async Task Run(
+        public static async Task RunQueue(
             [QueueTrigger("populate-queue", Connection = "AzureWebJobsStorage")]
             string message,
             ILogger log)
