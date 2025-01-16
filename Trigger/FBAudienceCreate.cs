@@ -1,29 +1,161 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.WebJobs;
-using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.Extensions.Logging;
 
 using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
 
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using Microsoft.WindowsAzure.Storage.Blob;
-
-using static Trigger.helper;
 
 namespace Trigger
 {
     public static class FBAudienceCreate
     {
+        /// <summary>
+        /// Queue to Populate FB audiences.
+        /// </summary>
+        [FunctionName("PopulateFacebookAudienceQueue")]
+        public static async Task RunQueue(
+            [QueueTrigger("populate-queue", Connection = "AzureWebJobsStorage")]
+            string message,
+            ILogger log)
+        {
+            log.LogInformation("===== PopulateFacebookAudienceFunction START =====");
+
+            var payload = JsonConvert.DeserializeObject<PopulateAudiencePayload>(message);
+
+            try
+            {
+                // 1. Connect to the Storage
+                string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
+                BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
+                BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(payload.ContainerName);
+
+                var audienceUpdates = new Dictionary<string, object>
+            {
+                { "audience_id", payload.AudienceId },
+                { "session_id", "" },
+                { "num_received", 0 },
+                { "num_invalid_entries", 0 },
+                { "invalid_entry_samples", new JArray() }
+            };
+                using (var httpClient = new HttpClient())
+                {
+                    // 2. Download, deserialize, and upload to FB, each blob on the list
+                    foreach (var blobPath in payload.BlobPaths)
+                    {
+                        log.LogInformation($"Downloading blob: {blobPath}");
+                        var blobClient = containerClient.GetBlobClient(blobPath);
+                        if (!await blobClient.ExistsAsync())
+                        {
+                            log.LogWarning($"Blob {blobPath} does not exist. Skipping.");
+                            continue;
+                        }
+
+                        var downloadResult = await blobClient.DownloadContentAsync();
+                        var jsonContent = downloadResult.Value.Content.ToString();
+
+                        var customersChunk = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(jsonContent);
+                        if (customersChunk == null || customersChunk.Count == 0)
+                        {
+                            log.LogWarning($"Blob {blobPath} is empty or invalid.");
+                            continue;
+                        }
+
+                        // Chunk in 9999
+                        int chunkSize = 9999;
+                        var subChunks = customersChunk
+                            .Select((c, idx) => new { c, idx })
+                            .GroupBy(x => x.idx / chunkSize)
+                            .Select(g => g.Select(x => x.c).ToList())
+                            .ToList();
+
+                        // Call to FB
+                        string addUsersApiUrl = $"https://graph.facebook.com/v20.0/{payload.AudienceId}/users";
+
+                        foreach (var subChunk in subChunks)
+                        {
+                            var dataForFacebook = helper.PrepareDataForFacebook(subChunk);
+                            var schema = new List<string> {
+                            "EMAIL","EMAIL","EMAIL",
+                            "PHONE","PHONE","PHONE",
+                            "FN","LN","ZIP",
+                            "CT","ST","COUNTRY",
+                            "DOBY","GEN"
+                        };
+                            var addUsersPayload = new
+                            {
+                                schema = schema,
+                                data = dataForFacebook
+                            };
+
+                            using (var addUsersContent = new MultipartFormDataContent())
+                            {
+                                addUsersContent.Add(new StringContent(JsonConvert.SerializeObject(addUsersPayload)), "payload");
+                                addUsersContent.Add(new StringContent(payload.FacebookAccessToken), "access_token");
+
+                                var response = await httpClient.PostAsync(addUsersApiUrl, addUsersContent);
+                                if (!response.IsSuccessStatusCode)
+                                {
+                                    var errorContent = await response.Content.ReadAsStringAsync();
+                                    throw new HttpRequestException($"Facebook API Error: {errorContent}");
+                                }
+
+                                var addUsersResponseContent = await response.Content.ReadAsStringAsync();
+                                var addUsersResult = JsonConvert.DeserializeObject<JObject>(addUsersResponseContent);
+
+                                audienceUpdates["session_id"] = addUsersResult["session_id"]?.ToString();
+                                audienceUpdates["num_received"] = (int)audienceUpdates["num_received"] + (int)addUsersResult["num_received"];
+                                audienceUpdates["num_invalid_entries"] = (int)audienceUpdates["num_invalid_entries"] + (int)addUsersResult["num_invalid_entries"];
+                                ((JArray)audienceUpdates["invalid_entry_samples"]).Merge(addUsersResult["invalid_entry_samples"]);
+                            }
+                        }
+                    }
+                }
+
+                // 3. Delete blobs
+                log.LogInformation("Deleting associated blobs...");
+                foreach (var blobPath in payload.BlobPaths)
+                {
+                    var blobClient = containerClient.GetBlobClient(blobPath);
+                    await blobClient.DeleteIfExistsAsync(Azure.Storage.Blobs.Models.DeleteSnapshotsOption.IncludeSnapshots);
+                }
+
+                // 4. Send notification email (success)
+                var summary = $"Audience: {payload.AudienceId}\n" +
+                              $"num_received: {audienceUpdates["num_received"]}\n" +
+                              $"num_invalid_entries: {audienceUpdates["num_invalid_entries"]}\n";
+
+                await helper.SendMail(payload.UserEmail,
+                    "Audience Population Completed",
+                    $"The population process for the FB Audience: {payload.AudienceId} - {payload.AudienceName}, was completed succesfully." +
+                    $"\nSummary: {summary}");
+
+
+                log.LogInformation($"Populate completed for audience {payload.AudienceId}. num_received={audienceUpdates["num_received"]}, invalid={audienceUpdates["num_invalid_entries"]}");
+
+                log.LogInformation("===== PopulateFacebookAudienceFunction END =====");
+            }
+            catch (Exception ex)
+            {
+                // Notify the error by email
+                await helper.SendMail(payload.UserEmail,
+                    "Error populating Facebook Audience",
+                    $"An error happened while populating the FB Audience: {payload.AudienceId} - {payload.AudienceName}" +
+                    $"\nError message: {ex.Message}\nStackTrace:\n{ex.StackTrace}");
+
+                // Error handling: try to clean blobs
+                await helper.HandleErrorAndCleanUpBlobs(ex, message);
+
+                log.LogError(ex, "Error in PopulateFacebookAudienceQueue");
+            }
+        }
+
         //[FunctionName("PopulateFacebookAudienceFunction")]
         //public static async Task<IActionResult> Run(
         //    [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = null)]
@@ -174,7 +306,7 @@ namespace Trigger
         //            var summary = $"Audience: {audienceId}\n" +
         //                          $"num_received: {audienceUpdates["num_received"]}\n" +
         //                          $"num_invalid_entries: {audienceUpdates["num_invalid_entries"]}\n";
-                    
+
         //            await helper.SendMail(payload.UserEmail,
         //                "Audience Population Completed",
         //                $"The population process for the FB Audience: {payload.AudienceId} - {payload.AudienceName}, was completed succesfully." +
@@ -232,146 +364,6 @@ namespace Trigger
 
         //    return new AcceptedResult();
         //}
-        
-        /// <summary>
-        /// Queue to Populate FB audiences.
-        /// </summary>
-        [FunctionName("PopulateFacebookAudienceQueue")]
-        public static async Task RunQueue(
-            [QueueTrigger("populate-queue", Connection = "AzureWebJobsStorage")]
-            string message,
-            ILogger log)
-        {
-            log.LogInformation("===== PopulateFacebookAudienceFunction START =====");
-
-            var payload = JsonConvert.DeserializeObject<PopulateAudiencePayload>(message);
-
-            try
-            {
-                // 1. Conectarse al Storage
-                string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
-                BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
-                BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(payload.ContainerName);
-
-                var audienceUpdates = new Dictionary<string, object>
-            {
-                { "audience_id", payload.AudienceId },
-                { "session_id", "" },
-                { "num_received", 0 },
-                { "num_invalid_entries", 0 },
-                { "invalid_entry_samples", new JArray() }
-            };
-                using (var httpClient = new HttpClient())
-                {
-                    // 2. Por cada blob en la lista, descargar, deserializar, subir a FB
-                    foreach (var blobPath in payload.BlobPaths)
-                    {
-                        log.LogInformation($"Downloading blob: {blobPath}");
-                        var blobClient = containerClient.GetBlobClient(blobPath);
-                        if (!await blobClient.ExistsAsync())
-                        {
-                            log.LogWarning($"Blob {blobPath} does not exist. Skipping.");
-                            continue;
-                        }
-
-                        var downloadResult = await blobClient.DownloadContentAsync();
-                        var jsonContent = downloadResult.Value.Content.ToString();
-
-                        var customersChunk = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(jsonContent);
-                        if (customersChunk == null || customersChunk.Count == 0)
-                        {
-                            log.LogWarning($"Blob {blobPath} is empty or invalid.");
-                            continue;
-                        }
-
-                        // Subdividir en 9999
-                        int chunkSize = 9999;
-                        var subChunks = customersChunk
-                            .Select((c, idx) => new { c, idx })
-                            .GroupBy(x => x.idx / chunkSize)
-                            .Select(g => g.Select(x => x.c).ToList())
-                            .ToList();
-
-                        // Llamar a FB
-                        string addUsersApiUrl = $"https://graph.facebook.com/v20.0/{payload.AudienceId}/users";
-
-                        foreach (var subChunk in subChunks)
-                        {
-                            var dataForFacebook = helper.PrepareDataForFacebook(subChunk);
-                            var schema = new List<string> {
-                            "EMAIL","EMAIL","EMAIL",
-                            "PHONE","PHONE","PHONE",
-                            "FN","LN","ZIP",
-                            "CT","ST","COUNTRY",
-                            "DOBY","GEN"
-                        };
-                            var addUsersPayload = new
-                            {
-                                schema = schema,
-                                data = dataForFacebook
-                            };
-
-                            using (var addUsersContent = new MultipartFormDataContent())
-                            {
-                                addUsersContent.Add(new StringContent(JsonConvert.SerializeObject(addUsersPayload)), "payload");
-                                addUsersContent.Add(new StringContent(payload.FacebookAccessToken), "access_token");
-
-                                var response = await httpClient.PostAsync(addUsersApiUrl, addUsersContent);
-                                if (!response.IsSuccessStatusCode)
-                                {
-                                    var errorContent = await response.Content.ReadAsStringAsync();
-                                    throw new HttpRequestException($"Facebook API Error: {errorContent}");
-                                }
-
-                                var addUsersResponseContent = await response.Content.ReadAsStringAsync();
-                                var addUsersResult = JsonConvert.DeserializeObject<JObject>(addUsersResponseContent);
-
-                                audienceUpdates["session_id"] = addUsersResult["session_id"]?.ToString();
-                                audienceUpdates["num_received"] = (int)audienceUpdates["num_received"] + (int)addUsersResult["num_received"];
-                                audienceUpdates["num_invalid_entries"] = (int)audienceUpdates["num_invalid_entries"] + (int)addUsersResult["num_invalid_entries"];
-                                ((JArray)audienceUpdates["invalid_entry_samples"]).Merge(addUsersResult["invalid_entry_samples"]);
-                            }
-                        }
-                    }
-                }
-
-                // 3. Borrar blobs
-                log.LogInformation("Deleting associated blobs...");
-                foreach (var blobPath in payload.BlobPaths)
-                {
-                    var blobClient = containerClient.GetBlobClient(blobPath);
-                    await blobClient.DeleteIfExistsAsync(Azure.Storage.Blobs.Models.DeleteSnapshotsOption.IncludeSnapshots);
-                }
-
-                // 4. Send notification email (success)
-                var summary = $"Audience: {payload.AudienceId}\n" +
-                              $"num_received: {audienceUpdates["num_received"]}\n" +
-                              $"num_invalid_entries: {audienceUpdates["num_invalid_entries"]}\n";
-
-                await helper.SendMail(payload.UserEmail,
-                    "Audience Population Completed",
-                    $"The population process for the FB Audience: {payload.AudienceId} - {payload.AudienceName}, was completed succesfully." +
-                    $"\nSummary: {summary}");
-
-
-                log.LogInformation($"Populate completed for audience {payload.AudienceId}. num_received={audienceUpdates["num_received"]}, invalid={audienceUpdates["num_invalid_entries"]}");
-
-                log.LogInformation("===== PopulateFacebookAudienceFunction END =====");
-            }
-            catch (Exception ex)
-            {
-                // Notify the error by email
-                await helper.SendMail(payload.UserEmail,
-                    "Error populating Facebook Audience",
-                    $"An error happened while populating the FB Audience: {payload.AudienceId} - {payload.AudienceName}" +
-                    $"\nError message: {ex.Message}\nStackTrace:\n{ex.StackTrace}");
-
-                // Error handling: try to clean blobs
-                await helper.HandleErrorAndCleanUpBlobs(ex, message);
-
-                log.LogError(ex, "Error in PopulateFacebookAudienceQueue");
-            }
-        }
     }
 
     /// <summary>

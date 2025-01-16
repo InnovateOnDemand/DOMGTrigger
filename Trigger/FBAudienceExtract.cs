@@ -12,7 +12,7 @@ using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Queues;
 using System.Text;
-using System.Net.Http;
+
 namespace Trigger
 {
     public static class FBAudienceExtract
@@ -24,11 +24,11 @@ namespace Trigger
             ILogger log)
         {
             log.LogInformation("===== ExtractBigQueryDataFunction START =====");
-            // 1. Deserializar el mensaje
+            // 1. Deserializing the message
             var payload = JsonConvert.DeserializeObject<ExtractAudiencePayload>(message);
             try
             {
-                // 2. Extraer data de BigQuery
+                // 2. Extracting data from BigQuery
                 var customerData = GetCustomerDataFromBigQuery(
                     payload.Sql, payload.SqlSales, payload.SqlService, log);
                 if (customerData.Count == 0)
@@ -36,7 +36,7 @@ namespace Trigger
                     log.LogInformation("No data found from BigQuery. Exiting function...");
                     return;
                 }
-                // 3. Guardar data en Blob
+                // 3. Saving data in Blob
                 string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
                 string containerName = string.IsNullOrEmpty(payload.ContainerName)
                                         ? "fb-audiences-data"
@@ -52,8 +52,8 @@ namespace Trigger
                     log.LogInformation("No valid blobs created. Possibly no data. Exiting function...");
                     return;
                 }
-                // 4. Encolar mensaje para la Function "Populate" o "Replace"
-                //    segun IsReplace
+                // 4. Enqueue message for the Function "Populate" or "Replace"
+                //    according to IsReplace
                 string nextQueueName = payload.IsReplace ? "replace-queue" : "populate-queue";
                 QueueClient queueClient = new QueueClient(storageConnectionString, nextQueueName);
                 await queueClient.CreateIfNotExistsAsync();
@@ -85,10 +85,10 @@ namespace Trigger
             string sql, string sqlSales, string sqlService, ILogger log)
         {
             log.LogInformation("Extracting data from BigQuery...");
-            // Combinar 'sql', 'sqlSales', 'sqlService' si fuera necesario.
-            // Ejemplo: asumiendo `sql` es tu WHERE principal. 
-            // Haz tus validaciones.
-            // 1. Construir query
+            // Combining 'sql', 'sqlSales', 'sqlService' if needed.
+            // E.g.: asumming `sql` is the main WHERE. 
+            
+            // 1. Building query
             string query = $@"
                 SELECT 
                   max(E.EMAIL1) as email1, 
@@ -116,16 +116,18 @@ namespace Trigger
                 {sql}
                 group by c.pid
             ";
-            // 2. Credenciales
-            //var jsonCredentialFileApi = Path.Combine(Environment.CurrentDirectory, "infutor-tci-auto-email-a2833fed2f8a.json");
-            //var credential = GoogleCredential.FromFile(jsonCredentialFileApi);
+
+            // 2. Credentials            
             string jsonCreds = Environment.GetEnvironmentVariable("GOOGLE_CREDENTIALS_JSON");
             var credential = GoogleCredential.FromJson(jsonCreds);
-            // 3. Crear cliente
+
+            // 3. Creating cliente
             var client = BigQueryClient.Create("infutor-tci-auto-email", credential);
-            // 4. Ejecutar query
+
+            // 4. Running query
             BigQueryResults results = client.ExecuteQuery(query, parameters: null);
-            // 5. Mapear a List<Dictionary<string, object>>
+
+            // 5. Mapping to List<Dictionary<string, object>>
             var customerData = new List<Dictionary<string, object>>();
             foreach (var row in results)
             {
@@ -148,6 +150,7 @@ namespace Trigger
                 };
                 customerData.Add(dict);
             }
+
             return customerData;
         }
 

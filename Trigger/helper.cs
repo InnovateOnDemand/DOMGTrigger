@@ -45,7 +45,9 @@ namespace Trigger
             return finalList;
         }
 
-        // In case of error, delete the blobs
+        /// <summary>
+        /// Function to delete the blobs in case of errors.
+        /// </summary>
         public static async Task HandleErrorAndCleanUpBlobs(Exception ex, string message)
         {
             try
