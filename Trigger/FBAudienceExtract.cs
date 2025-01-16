@@ -17,69 +17,69 @@ namespace Trigger
 {
     public static class FBAudienceExtract
     {
-        [FunctionName("ExtractBigQueryDataQueue")]
-        public static async Task RunQueue(
-            [QueueTrigger("extract-queue", Connection = "AzureWebJobsStorage")]
-            string message,
-            ILogger log)
-        {
-            log.LogInformation("===== ExtractBigQueryDataFunction START =====");
-            // 1. Deserializar el mensaje
-            var payload = JsonConvert.DeserializeObject<ExtractAudiencePayload>(message);
-            try
-            {
-                // 2. Extraer data de BigQuery
-                var customerData = GetCustomerDataFromBigQuery(
-                    payload.Sql, payload.SqlSales, payload.SqlService, log);
-                if (customerData.Count == 0)
-                {
-                    log.LogInformation("No data found from BigQuery. Exiting function...");
-                    return;
-                }
-                // 3. Guardar data en Blob
-                string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
-                string containerName = string.IsNullOrEmpty(payload.ContainerName)
-                                        ? "fb-audiences-data"
-                                        : payload.ContainerName;
-                var blobPaths = await SaveCustomerDataToBlobAsync(
-                    payload.AudienceId,
-                    customerData,
-                    containerName,
-                    storageConnectionString);
-                log.LogInformation($"Total records: {customerData.Count}, Blobs created: {blobPaths.Count}");
-                if (blobPaths.Count == 0)
-                {
-                    log.LogInformation("No valid blobs created. Possibly no data. Exiting function...");
-                    return;
-                }
-                // 4. Encolar mensaje para la Function "Populate" o "Replace"
-                //    segun IsReplace
-                string nextQueueName = payload.IsReplace ? "replace-queue" : "populate-queue";
-                QueueClient queueClient = new QueueClient(storageConnectionString, nextQueueName);
-                await queueClient.CreateIfNotExistsAsync();
-                var nextPayload = new PopulateQueuePayload
-                {
-                    AudienceId = payload.AudienceId,
-                    AudienceName = payload.AudienceName,
-                    FacebookAccessToken = payload.FacebookAccessToken,
-                    ContainerName = containerName,
-                    BlobPaths = blobPaths,
-                    UserEmail = payload.UserEmail
-                };
-                string nextJson = JsonConvert.SerializeObject(nextPayload);
-                string nextJsonBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(nextJson));
-                await queueClient.SendMessageAsync(nextJsonBase64);
-                log.LogInformation($"Message enqueued to {nextQueueName}. Done extraction.");
-            }
-            catch (Exception ex)
-            {
-                // Notify the error by email
-                await helper.SendMail(payload.UserEmail,
-                    "Error the extracting Customer data for Facebook Audience",
-                    $"An error happened while extracting the data for the FB Audience: {payload.AudienceId} - {payload.AudienceName}" +
-                    $"\nError message: {ex.Message}\nStackTrace:\n{ex.StackTrace}");
-            }
-        }
+        //[FunctionName("ExtractBigQueryDataQueue")]
+        //public static async Task RunQueue(
+        //    [QueueTrigger("extract-queue", Connection = "AzureWebJobsStorage")]
+        //    string message,
+        //    ILogger log)
+        //{
+        //    log.LogInformation("===== ExtractBigQueryDataFunction START =====");
+        //    // 1. Deserializar el mensaje
+        //    var payload = JsonConvert.DeserializeObject<ExtractAudiencePayload>(message);
+        //    try
+        //    {
+        //        // 2. Extraer data de BigQuery
+        //        var customerData = GetCustomerDataFromBigQuery(
+        //            payload.Sql, payload.SqlSales, payload.SqlService, log);
+        //        if (customerData.Count == 0)
+        //        {
+        //            log.LogInformation("No data found from BigQuery. Exiting function...");
+        //            return;
+        //        }
+        //        // 3. Guardar data en Blob
+        //        string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
+        //        string containerName = string.IsNullOrEmpty(payload.ContainerName)
+        //                                ? "fb-audiences-data"
+        //                                : payload.ContainerName;
+        //        var blobPaths = await SaveCustomerDataToBlobAsync(
+        //            payload.AudienceId,
+        //            customerData,
+        //            containerName,
+        //            storageConnectionString);
+        //        log.LogInformation($"Total records: {customerData.Count}, Blobs created: {blobPaths.Count}");
+        //        if (blobPaths.Count == 0)
+        //        {
+        //            log.LogInformation("No valid blobs created. Possibly no data. Exiting function...");
+        //            return;
+        //        }
+        //        // 4. Encolar mensaje para la Function "Populate" o "Replace"
+        //        //    segun IsReplace
+        //        string nextQueueName = payload.IsReplace ? "replace-queue" : "populate-queue";
+        //        QueueClient queueClient = new QueueClient(storageConnectionString, nextQueueName);
+        //        await queueClient.CreateIfNotExistsAsync();
+        //        var nextPayload = new PopulateQueuePayload
+        //        {
+        //            AudienceId = payload.AudienceId,
+        //            AudienceName = payload.AudienceName,
+        //            FacebookAccessToken = payload.FacebookAccessToken,
+        //            ContainerName = containerName,
+        //            BlobPaths = blobPaths,
+        //            UserEmail = payload.UserEmail
+        //        };
+        //        string nextJson = JsonConvert.SerializeObject(nextPayload);
+        //        string nextJsonBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(nextJson));
+        //        await queueClient.SendMessageAsync(nextJsonBase64);
+        //        log.LogInformation($"Message enqueued to {nextQueueName}. Done extraction.");
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        // Notify the error by email
+        //        await helper.SendMail(payload.UserEmail,
+        //            "Error the extracting Customer data for Facebook Audience",
+        //            $"An error happened while extracting the data for the FB Audience: {payload.AudienceId} - {payload.AudienceName}" +
+        //            $"\nError message: {ex.Message}\nStackTrace:\n{ex.StackTrace}");
+        //    }
+        //}
 
         private static List<Dictionary<string, object>> GetCustomerDataFromBigQuery(
             string sql, string sqlSales, string sqlService, ILogger log)

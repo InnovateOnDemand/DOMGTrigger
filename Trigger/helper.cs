@@ -4,6 +4,10 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Newtonsoft.Json;
+
 namespace Trigger
 {
     public static class helper
@@ -39,6 +43,34 @@ namespace Trigger
             }
 
             return finalList;
+        }
+
+        // In case of error, delete the blobs
+        public static async Task HandleErrorAndCleanUpBlobs(Exception ex, string message)
+        {
+            try
+            {
+                var payload = JsonConvert.DeserializeObject<PopulateAudiencePayload>(message);
+
+                if (payload != null
+                    && !string.IsNullOrEmpty(payload.ContainerName)
+                    && payload.BlobPaths != null
+                    && payload.BlobPaths.Count > 0)
+                {
+                    var blobServiceClient2 = new BlobServiceClient(Environment.GetEnvironmentVariable("AzureWebJobsStorage"));
+                    var containerClient2 = blobServiceClient2.GetBlobContainerClient(payload.ContainerName);
+
+                    foreach (var blobPath in payload.BlobPaths)
+                    {
+                        await containerClient2.GetBlobClient(blobPath)
+                            .DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots);
+                    }
+                }
+            }
+            catch
+            {
+                // Silence any additional exceptions
+            }
         }
 
         /// <summary>
