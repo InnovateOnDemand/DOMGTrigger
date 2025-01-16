@@ -18,6 +18,8 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Microsoft.WindowsAzure.Storage.Blob;
 
+using static Trigger.helper;
+
 namespace Trigger
 {
     public static class FBAudienceCreate
@@ -28,9 +30,6 @@ namespace Trigger
             HttpRequest req,
             ILogger log)
         {
-            // Email address for notifications.
-            const string notificationEmail = "lenin.carrasco@innovateod.com";
-
             // Take the connection string of Storage from settings:
             // (Normally it is defined in "AzureWebJobsStorage" or in another environment variable.)
             string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
@@ -64,13 +63,13 @@ namespace Trigger
 
                     // 3. Prepare an object to gather global results
                     var audienceUpdates = new Dictionary<string, object>
-                {
-                    { "audience_id", audienceId },
-                    { "session_id", "" },
-                    { "num_received", 0 },
-                    { "num_invalid_entries", 0 },
-                    { "invalid_entry_samples", new JArray() }
-                };
+                    {
+                        { "audience_id", audienceId },
+                        { "session_id", "" },
+                        { "num_received", 0 },
+                        { "num_invalid_entries", 0 },
+                        { "invalid_entry_samples", new JArray() }
+                    };
 
                     // 4. Connect to Blob Storage
                     BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
@@ -116,7 +115,8 @@ namespace Trigger
                             foreach (var subChunk in subChunks)
                             {
                                 // Prepare data for Facebook (adjust as needed)
-                                var dataForFacebook = PrepareDataForFacebook(subChunk);
+                                //var dataForFacebook = PrepareDataForFacebook(subChunk);
+                                var dataForFacebook = helper.PrepareDataForFacebook(subChunk);
 
                                 var schema = new List<string>
                                 {
@@ -174,10 +174,11 @@ namespace Trigger
                     var summary = $"Audiencia: {audienceId}\n" +
                                   $"num_received: {audienceUpdates["num_received"]}\n" +
                                   $"num_invalid_entries: {audienceUpdates["num_invalid_entries"]}\n";
-
-                    await SendMail(notificationEmail,
-                        "Carga de audiencia finalizada con éxito",
-                        $"Se ha completado el proceso de poblado para la audiencia {audienceId}.\n{summary}");
+                    
+                    await helper.SendMail(payload.UserEmail,
+                        "Audience Population Completed",
+                        $"The population process for the FB Audience: {payload.AudienceId} - {payload.AudienceName}, was completed succesfully" +
+                        $"\nSummary: {summary}");
 
                     // Final response OK
                     log.LogInformation("===== PopulateFacebookAudienceFunction FIN =====");
@@ -217,9 +218,10 @@ namespace Trigger
                     }
 
                     // Notify the error by email
-                    //await SendMail("notificaciones@tudominio.com",
-                    //    "Error en PopulateFacebookAudienceFunction",
-                    //    $"Mensaje: {ex.Message}\nStackTrace:\n{ex.StackTrace}");
+                    await helper.SendMail(payload.UserEmail,
+                        "Error populating Facebook Audience",
+                        $"An error happened while populating the FB Audience: {payload.AudienceId} - {payload.AudienceName}" +
+                        $"\nError message: {ex.Message}\nStackTrace:\n{ex.StackTrace}");
 
                     return new ObjectResult($"Error in PopulateFacebookAudienceFunction: {ex.Message}")
                     {
@@ -230,53 +232,7 @@ namespace Trigger
 
             return new AcceptedResult();
         }
-
-        /// <summary>
-        /// Converts the list of dictionaries into the structure expected by Facebook.
-        /// </summary>
-        private static List<List<string>> PrepareDataForFacebook(List<Dictionary<string, object>> subChunk)
-        {
-            var finalList = new List<List<string>>();
-
-            foreach (var customer in subChunk)
-            {
-                var row = new List<string>
-                {
-                    customer.ContainsKey("Email1") ? customer["Email1"]?.ToString() : "",
-                    customer.ContainsKey("Email2") ? customer["Email2"]?.ToString() : "",
-                    customer.ContainsKey("Email3") ? customer["Email3"]?.ToString() : "",
-                    customer.ContainsKey("Phone1") ? customer["Phone1"]?.ToString() : "",
-                    customer.ContainsKey("Phone2") ? customer["Phone2"]?.ToString() : "",
-                    customer.ContainsKey("Phone3") ? customer["Phone3"]?.ToString() : "",
-                    customer.ContainsKey("FirstName") ? customer["FirstName"]?.ToString() : "",
-                    customer.ContainsKey("LastName") ? customer["LastName"]?.ToString() : "",
-                    customer.ContainsKey("Zip") ? customer["Zip"]?.ToString() : "",
-                    customer.ContainsKey("City") ? customer["City"]?.ToString() : "",
-                    customer.ContainsKey("State") ? customer["State"]?.ToString() : "",
-                    customer.ContainsKey("Country") ? customer["Country"]?.ToString() : "",
-                    customer.ContainsKey("DOBYear") ? customer["DOBYear"]?.ToString() : "",
-                    customer.ContainsKey("Gender") ? customer["Gender"]?.ToString() : "",
-                };
-
-                finalList.Add(row);
-            }
-
-            return finalList;
-        }
-
-        /// <summary>
-        /// Function to send email.
-        /// </summary>
-        private static Task SendMail(string recipient, string subject, string body)
-        {            
-            Console.WriteLine("=== ENVIANDO CORREO ===");
-            Console.WriteLine($"To: {recipient}");
-            Console.WriteLine($"Subject: {subject}");
-            Console.WriteLine($"Body:\n{body}");
-            // TO-DO: Implement the email sending logic here.
-            return Task.CompletedTask;
-        }
-
+        
         /// <summary>
         /// Queue to Populate FB audiences.
         /// </summary>
@@ -290,12 +246,14 @@ namespace Trigger
 
             var payload = JsonConvert.DeserializeObject<PopulateAudiencePayload>(message);
 
-            // 1. Conectarse al Storage
-            string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
-            BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
-            BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(payload.ContainerName);
+            try
+            {
+                // 1. Conectarse al Storage
+                string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
+                BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
+                BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(payload.ContainerName);
 
-            var audienceUpdates = new Dictionary<string, object>
+                var audienceUpdates = new Dictionary<string, object>
             {
                 { "audience_id", payload.AudienceId },
                 { "session_id", "" },
@@ -303,93 +261,111 @@ namespace Trigger
                 { "num_invalid_entries", 0 },
                 { "invalid_entry_samples", new JArray() }
             };
-            using (var httpClient = new HttpClient())
-            {
-                // 2. Por cada blob en la lista, descargar, deserializar, subir a FB
-                foreach (var blobPath in payload.BlobPaths)
+                using (var httpClient = new HttpClient())
                 {
-                    log.LogInformation($"Downloading blob: {blobPath}");
-                    var blobClient = containerClient.GetBlobClient(blobPath);
-                    if (!await blobClient.ExistsAsync())
+                    // 2. Por cada blob en la lista, descargar, deserializar, subir a FB
+                    foreach (var blobPath in payload.BlobPaths)
                     {
-                        log.LogWarning($"Blob {blobPath} does not exist. Skipping.");
-                        continue;
-                    }
+                        log.LogInformation($"Downloading blob: {blobPath}");
+                        var blobClient = containerClient.GetBlobClient(blobPath);
+                        if (!await blobClient.ExistsAsync())
+                        {
+                            log.LogWarning($"Blob {blobPath} does not exist. Skipping.");
+                            continue;
+                        }
 
-                    var downloadResult = await blobClient.DownloadContentAsync();
-                    var jsonContent = downloadResult.Value.Content.ToString();
+                        var downloadResult = await blobClient.DownloadContentAsync();
+                        var jsonContent = downloadResult.Value.Content.ToString();
 
-                    var customersChunk = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(jsonContent);
-                    if (customersChunk == null || customersChunk.Count == 0)
-                    {
-                        log.LogWarning($"Blob {blobPath} is empty or invalid.");
-                        continue;
-                    }
+                        var customersChunk = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(jsonContent);
+                        if (customersChunk == null || customersChunk.Count == 0)
+                        {
+                            log.LogWarning($"Blob {blobPath} is empty or invalid.");
+                            continue;
+                        }
 
-                    // Subdividir en 9999
-                    int chunkSize = 9999;
-                    var subChunks = customersChunk
-                        .Select((c, idx) => new { c, idx })
-                        .GroupBy(x => x.idx / chunkSize)
-                        .Select(g => g.Select(x => x.c).ToList())
-                        .ToList();
+                        // Subdividir en 9999
+                        int chunkSize = 9999;
+                        var subChunks = customersChunk
+                            .Select((c, idx) => new { c, idx })
+                            .GroupBy(x => x.idx / chunkSize)
+                            .Select(g => g.Select(x => x.c).ToList())
+                            .ToList();
 
-                    // Llamar a FB
-                    string addUsersApiUrl = $"https://graph.facebook.com/v20.0/{payload.AudienceId}/users";
+                        // Llamar a FB
+                        string addUsersApiUrl = $"https://graph.facebook.com/v20.0/{payload.AudienceId}/users";
 
-                    foreach (var subChunk in subChunks)
-                    {
-                        var dataForFacebook = PrepareDataForFacebook(subChunk);
-                        var schema = new List<string> {
+                        foreach (var subChunk in subChunks)
+                        {
+                            var dataForFacebook = helper.PrepareDataForFacebook(subChunk);
+                            var schema = new List<string> {
                             "EMAIL","EMAIL","EMAIL",
                             "PHONE","PHONE","PHONE",
                             "FN","LN","ZIP",
                             "CT","ST","COUNTRY",
                             "DOBY","GEN"
                         };
-                        var addUsersPayload = new
-                        {
-                            schema = schema,
-                            data = dataForFacebook
-                        };
-
-                        using (var addUsersContent = new MultipartFormDataContent())
-                        {
-                            addUsersContent.Add(new StringContent(JsonConvert.SerializeObject(addUsersPayload)), "payload");
-                            addUsersContent.Add(new StringContent(payload.FacebookAccessToken), "access_token");
-
-                            var response = await httpClient.PostAsync(addUsersApiUrl, addUsersContent);
-                            if (!response.IsSuccessStatusCode)
+                            var addUsersPayload = new
                             {
-                                var errorContent = await response.Content.ReadAsStringAsync();
-                                throw new HttpRequestException($"Facebook API Error: {errorContent}");
+                                schema = schema,
+                                data = dataForFacebook
+                            };
+
+                            using (var addUsersContent = new MultipartFormDataContent())
+                            {
+                                addUsersContent.Add(new StringContent(JsonConvert.SerializeObject(addUsersPayload)), "payload");
+                                addUsersContent.Add(new StringContent(payload.FacebookAccessToken), "access_token");
+
+                                var response = await httpClient.PostAsync(addUsersApiUrl, addUsersContent);
+                                if (!response.IsSuccessStatusCode)
+                                {
+                                    var errorContent = await response.Content.ReadAsStringAsync();
+                                    throw new HttpRequestException($"Facebook API Error: {errorContent}");
+                                }
+
+                                var addUsersResponseContent = await response.Content.ReadAsStringAsync();
+                                var addUsersResult = JsonConvert.DeserializeObject<JObject>(addUsersResponseContent);
+
+                                audienceUpdates["session_id"] = addUsersResult["session_id"]?.ToString();
+                                audienceUpdates["num_received"] = (int)audienceUpdates["num_received"] + (int)addUsersResult["num_received"];
+                                audienceUpdates["num_invalid_entries"] = (int)audienceUpdates["num_invalid_entries"] + (int)addUsersResult["num_invalid_entries"];
+                                ((JArray)audienceUpdates["invalid_entry_samples"]).Merge(addUsersResult["invalid_entry_samples"]);
                             }
-
-                            var addUsersResponseContent = await response.Content.ReadAsStringAsync();
-                            var addUsersResult = JsonConvert.DeserializeObject<JObject>(addUsersResponseContent);
-
-                            audienceUpdates["session_id"] = addUsersResult["session_id"]?.ToString();
-                            audienceUpdates["num_received"] = (int)audienceUpdates["num_received"] + (int)addUsersResult["num_received"];
-                            audienceUpdates["num_invalid_entries"] = (int)audienceUpdates["num_invalid_entries"] + (int)addUsersResult["num_invalid_entries"];
-                            ((JArray)audienceUpdates["invalid_entry_samples"]).Merge(addUsersResult["invalid_entry_samples"]);
                         }
                     }
                 }
-            }
 
-            // 3. Borrar blobs
-            log.LogInformation("Deleting associated blobs...");
-            foreach (var blobPath in payload.BlobPaths)
+                // 3. Borrar blobs
+                log.LogInformation("Deleting associated blobs...");
+                foreach (var blobPath in payload.BlobPaths)
+                {
+                    var blobClient = containerClient.GetBlobClient(blobPath);
+                    await blobClient.DeleteIfExistsAsync(Azure.Storage.Blobs.Models.DeleteSnapshotsOption.IncludeSnapshots);
+                }
+
+                // 4. Send notification email (success)
+                var summary = $"Audiencia: {payload.AudienceId}\n" +
+                              $"num_received: {audienceUpdates["num_received"]}\n" +
+                              $"num_invalid_entries: {audienceUpdates["num_invalid_entries"]}\n";
+
+                await helper.SendMail(payload.UserEmail,
+                    "Audience Population Completed",
+                    $"The population process for the FB Audience: {payload.AudienceId} - {payload.AudienceName}, was completed succesfully" +
+                    $"\nSummary: {summary}");
+
+
+                log.LogInformation($"Populate completed for audience {payload.AudienceId}. num_received={audienceUpdates["num_received"]}, invalid={audienceUpdates["num_invalid_entries"]}");
+
+                log.LogInformation("===== PopulateFacebookAudienceFunction END =====");
+            }
+            catch (Exception ex)
             {
-                var blobClient = containerClient.GetBlobClient(blobPath);
-                await blobClient.DeleteIfExistsAsync(Azure.Storage.Blobs.Models.DeleteSnapshotsOption.IncludeSnapshots);
+                // Notify the error by email
+                await helper.SendMail(payload.UserEmail,
+                    "Error populating Facebook Audience",
+                    $"An error happened while populating the FB Audience: {payload.AudienceId} - {payload.AudienceName}" +
+                    $"\nError message: {ex.Message}\nStackTrace:\n{ex.StackTrace}");
             }
-
-            // 4. Notificar por correo, logs, etc.
-            // e.g. log info or call an email service
-            log.LogInformation($"Populate completed for audience {payload.AudienceId}. num_received={audienceUpdates["num_received"]}, invalid={audienceUpdates["num_invalid_entries"]}");
-
-            log.LogInformation("===== PopulateFacebookAudienceFunction END =====");
         }
     }
 
@@ -399,6 +375,7 @@ namespace Trigger
     public class PopulateAudiencePayload
     {
         public string AudienceId { get; set; }
+        public string AudienceName { get; set; }
         public string FacebookAccessToken { get; set; }
 
         // Name of the container where the blobs were saved
@@ -406,5 +383,6 @@ namespace Trigger
 
         // List of blobs (paths) associated with the audience
         public List<string> BlobPaths { get; set; }
+        public string UserEmail { get; set; }
     }
 }

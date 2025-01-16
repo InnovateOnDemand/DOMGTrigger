@@ -126,7 +126,7 @@ namespace Trigger
                             var subChunk = allCustomers.Skip(i).Take(chunkSize).ToList();
 
                             // Preparar data
-                            var dataForFacebook = PrepareDataForFacebook(subChunk);
+                            var dataForFacebook = helper.PrepareDataForFacebook(subChunk);
 
                             var payloadData = new
                             {
@@ -186,12 +186,13 @@ namespace Trigger
                         await blobClient.DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots);
                     }
 
-                    // 6. Notificar por correo
+                    // 6. Notify by Email
                     var summary = $"num_received: {audienceUpdates["num_received"]}, " +
                                   $"num_invalid_entries: {audienceUpdates["num_invalid_entries"]}";
-                    await SendMail(notificationEmail,
-                        "Reemplazo de audiencia completado",
-                        $"Se ha completado el proceso de REPLACE para la audiencia {audienceId}.\n{summary}");
+                    await helper.SendMail(notificationEmail,
+                        "Audience Update Completed",
+                        $"The update process for the FB Audience: {payload.AudienceId} - {payload.AudienceName}, was completed succesfully" +
+                        $"\nSummary: {summary}");
 
                     log.LogInformation("===== ReplaceFacebookAudienceFunction END =====");
 
@@ -199,8 +200,15 @@ namespace Trigger
                 }
                 catch (Exception ex)
                 {
-                    // Manejo de error: intentar limpiar blobs y notificar
+                    // Error handling: try to clean blobs
                     await HandleErrorAndCleanUpBlobs(ex, req);
+
+                    // Notify the error by email
+                    await helper.SendMail(payload.UserEmail,
+                        "Error replacing Facebook Audience",
+                        $"An error happened while populating the FB Audience: {payload.AudienceId} - {payload.AudienceName}" +
+                        $"\nError message: {ex.Message}\nStackTrace:\n{ex.StackTrace}");
+
                     return new ObjectResult($"Error en ReplaceFacebookAudienceFunction: {ex.Message}")
                     {
                         StatusCode = StatusCodes.Status500InternalServerError
@@ -238,59 +246,14 @@ namespace Trigger
             catch
             {
                 // Silencio cualquier error adicional
-            }
-
-            // Enviar correo de error
-            await SendMail("notificaciones@tudominio.com",
-                "Error en ReplaceFacebookAudienceFunction",
-                $"Mensaje: {ex.Message}\nStackTrace:\n{ex.StackTrace}");
+            }            
         }
 
         // Genera session_id único
         private static long GenerateUniqueSessionId()
         {
             return DateTime.UtcNow.Ticks;
-        }
-
-        // Convierte la data a la estructura requerida por FB
-        private static List<List<string>> PrepareDataForFacebook(List<Dictionary<string, object>> subChunk)
-        {
-            var finalList = new List<List<string>>();
-
-            foreach (var customer in subChunk)
-            {
-                var row = new List<string>
-                {
-                    customer.ContainsKey("Email1") ? customer["Email1"]?.ToString() : "",
-                    customer.ContainsKey("Email2") ? customer["Email2"]?.ToString() : "",
-                    customer.ContainsKey("Email3") ? customer["Email3"]?.ToString() : "",
-                    customer.ContainsKey("Phone1") ? customer["Phone1"]?.ToString() : "",
-                    customer.ContainsKey("Phone2") ? customer["Phone2"]?.ToString() : "",
-                    customer.ContainsKey("Phone3") ? customer["Phone3"]?.ToString() : "",
-                    customer.ContainsKey("FirstName") ? customer["FirstName"]?.ToString() : "",
-                    customer.ContainsKey("LastName") ? customer["LastName"]?.ToString() : "",
-                    customer.ContainsKey("Zip") ? customer["Zip"]?.ToString() : "",
-                    customer.ContainsKey("City") ? customer["City"]?.ToString() : "",
-                    customer.ContainsKey("State") ? customer["State"]?.ToString() : "",
-                    customer.ContainsKey("Country") ? customer["Country"]?.ToString() : "",
-                    customer.ContainsKey("DOBYear") ? customer["DOBYear"]?.ToString() : "",
-                    customer.ContainsKey("Gender") ? customer["Gender"]?.ToString() : "",
-                };
-
-                finalList.Add(row);
-            }
-            return finalList;
-        }
-
-        // "Fake" para enviar correo
-        private static Task SendMail(string recipient, string subject, string body)
-        {
-            Console.WriteLine("=== [ReplaceFacebookAudienceFunction] Enviando correo ===");
-            Console.WriteLine($"To: {recipient}");
-            Console.WriteLine($"Subject: {subject}");
-            Console.WriteLine($"Body: {body}");
-            return Task.CompletedTask;
-        }
+        }        
 
         [FunctionName("ReplaceFacebookAudienceQueue")]
         public static async Task RunQueue(
@@ -356,7 +319,7 @@ namespace Trigger
                 {
                     var subChunk = allCustomers.Skip(i).Take(chunkSize).ToList();
 
-                    var dataForFacebook = PrepareDataForFacebook(subChunk);
+                    var dataForFacebook = helper.PrepareDataForFacebook(subChunk);
                     var payloadData = new
                     {
                         schema = new[] {
@@ -422,10 +385,12 @@ namespace Trigger
     public class ReplaceAudiencePayload
     {
         public string AudienceId { get; set; }
+        public string AudienceName { get; set; }
         public string FacebookAccessToken { get; set; }
 
         // Blob container y paths donde se guardaron los datos
         public string ContainerName { get; set; }
         public List<string> BlobPaths { get; set; }
+        public string UserEmail { get; set; }
     }
 }
