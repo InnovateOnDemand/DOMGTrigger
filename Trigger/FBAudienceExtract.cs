@@ -87,7 +87,9 @@ namespace Trigger
             log.LogInformation("Extracting data from BigQuery...");
             // Combining 'sql', 'sqlSales', 'sqlService' if needed.
             // E.g.: asumming `sql` is the main WHERE. 
-            
+            string BQprojectName = Environment.GetEnvironmentVariable("BigQueryProjectName");
+            string BQdatasetName = Environment.GetEnvironmentVariable("BigQueryDatasetName");
+
             // 1. Building query
             string query = $@"
                 SELECT 
@@ -109,9 +111,9 @@ namespace Trigger
                   '' as uid,  
                   '' as madid, 
                   'US' as country
-                FROM `infutor-tci-auto-email.infutor_data.auto` as A 
-                inner join `infutor-tci-auto-email.infutor_data.email` as E ON A.PID = E.PID 
-                inner join `infutor-tci-auto-email.infutor_data.consumer` as C on C.PID = A.PID 
+                FROM `{BQprojectName}.{BQdatasetName}.auto` as A 
+                inner join `{BQprojectName}.{BQdatasetName}.email` as E ON A.PID = E.PID 
+                inner join `{BQprojectName}.{BQdatasetName}.consumer` as C on C.PID = A.PID 
                 WHERE 1=1
                 {sql}
                 group by c.pid
@@ -122,7 +124,7 @@ namespace Trigger
             var credential = GoogleCredential.FromJson(jsonCreds);
 
             // 3. Creating cliente
-            var client = BigQueryClient.Create("infutor-tci-auto-email", credential);
+            var client = BigQueryClient.Create(BQprojectName, credential);
 
             // 4. Running query
             BigQueryResults results = client.ExecuteQuery(query, parameters: null);
