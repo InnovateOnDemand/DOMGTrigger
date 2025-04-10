@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 using Azure.Storage.Blobs;
@@ -19,29 +21,39 @@ namespace Trigger
         {
             var finalList = new List<List<string>>();
 
+            // *** IMPORTANT: Use the correct dictionary keys (lowercase from FBAudienceExtract) ***
             foreach (var customer in subChunk)
             {
+                // Normalize and Hash each field before adding
                 var row = new List<string>
-                {
-                    customer.ContainsKey("Email1") ? customer["Email1"]?.ToString() : "",
-                    customer.ContainsKey("Email2") ? customer["Email2"]?.ToString() : "",
-                    customer.ContainsKey("Email3") ? customer["Email3"]?.ToString() : "",
-                    customer.ContainsKey("Phone1") ? customer["Phone1"]?.ToString() : "",
-                    customer.ContainsKey("Phone2") ? customer["Phone2"]?.ToString() : "",
-                    customer.ContainsKey("Phone3") ? customer["Phone3"]?.ToString() : "",
-                    customer.ContainsKey("FirstName") ? customer["FirstName"]?.ToString() : "",
-                    customer.ContainsKey("LastName") ? customer["LastName"]?.ToString() : "",
-                    customer.ContainsKey("Zip") ? customer["Zip"]?.ToString() : "",
-                    customer.ContainsKey("City") ? customer["City"]?.ToString() : "",
-                    customer.ContainsKey("State") ? customer["State"]?.ToString() : "",
-                    customer.ContainsKey("Country") ? customer["Country"]?.ToString() : "",
-                    customer.ContainsKey("DOBYear") ? customer["DOBYear"]?.ToString() : "",
-                    customer.ContainsKey("Gender") ? customer["Gender"]?.ToString() : "",
-                };
-
+            {
+                // EMAIL x 3
+                ComputeSha256Hash(NormalizeEmail(customer.ContainsKey("email1") ? customer["email1"]?.ToString() : "")),
+                ComputeSha256Hash(NormalizeEmail(customer.ContainsKey("email2") ? customer["email2"]?.ToString() : "")),
+                ComputeSha256Hash(NormalizeEmail(customer.ContainsKey("email3") ? customer["email3"]?.ToString() : "")),
+                // PHONE x 3
+                ComputeSha256Hash(NormalizePhone(customer.ContainsKey("phone1") ? customer["phone1"]?.ToString() : "")),
+                ComputeSha256Hash(NormalizePhone(customer.ContainsKey("phone2") ? customer["phone2"]?.ToString() : "")),
+                ComputeSha256Hash(NormalizePhone(customer.ContainsKey("phone3") ? customer["phone3"]?.ToString() : "")),
+                // FN (First Name)
+                ComputeSha256Hash(NormalizeName(customer.ContainsKey("fn") ? customer["fn"]?.ToString() : "")),
+                // LN (Last Name)
+                ComputeSha256Hash(NormalizeName(customer.ContainsKey("ln") ? customer["ln"]?.ToString() : "")),
+                // ZIP
+                ComputeSha256Hash(NormalizeZip(customer.ContainsKey("zip") ? customer["zip"]?.ToString() : "")),
+                // CT (City)
+                ComputeSha256Hash(NormalizeLocation(customer.ContainsKey("ct") ? customer["ct"]?.ToString() : "")),
+                // ST (State)
+                ComputeSha256Hash(NormalizeLocation(customer.ContainsKey("st") ? customer["st"]?.ToString() : "")),
+                // COUNTRY
+                ComputeSha256Hash(customer.ContainsKey("country") ? customer["country"]?.ToString().ToLowerInvariant() : ""), // Country code should already be 2 letters, just lowercase
+                // DOBY (Date of Birth Year)
+                ComputeSha256Hash(customer.ContainsKey("doby") ? customer["doby"]?.ToString() : ""), // Assuming YYYY format from query
+                // GEN (Gender)
+                ComputeSha256Hash(NormalizeGender(customer.ContainsKey("gen") ? customer["gen"]?.ToString() : ""))
+            };
                 finalList.Add(row);
             }
-
             return finalList;
         }
 
@@ -121,6 +133,64 @@ namespace Trigger
                     return false; // Indicate failure due to exception
                 }
             }
+        }
+
+        // Helper to compute SHA256 hash
+        private static string ComputeSha256Hash(string rawData)
+        {
+            if (string.IsNullOrEmpty(rawData))
+            {
+                return "";
+            }
+
+            using (SHA256 sha256Hash = SHA256.Create())
+            {
+                // ComputeHash - returns byte array
+                byte[] bytes = sha256Hash.ComputeHash(Encoding.UTF8.GetBytes(rawData));
+
+                // Convert byte array to a lowercase string
+                StringBuilder builder = new StringBuilder();
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    builder.Append(bytes[i].ToString("x2")); // "x2" formats as lowercase hex
+                }
+                return builder.ToString();
+            }
+        }
+
+        // Normalization Functions (Examples - refine based on exact needs)
+        private static string NormalizeEmail(string email)
+        {
+            return email?.Trim().ToLowerInvariant() ?? "";
+        }
+
+        private static string NormalizePhone(string phone)
+        {
+            // Remove non-digits, maybe handle country codes if needed
+            return Regex.Replace(phone ?? "", @"\D", "");
+        }
+
+        private static string NormalizeName(string name)
+        {
+            // Lowercase, remove punctuation (basic example)
+            return Regex.Replace(name?.ToLowerInvariant() ?? "", @"[^a-z]", "");
+        }
+
+        private static string NormalizeLocation(string loc)
+        {
+            // Lowercase, remove punctuation/spaces (basic example)
+            return Regex.Replace(loc?.ToLowerInvariant() ?? "", @"[^a-z]", "");
+        }
+        private static string NormalizeZip(string zip)
+        {
+            // Lowercase, remove spaces. Add logic for US 5-digit if necessary.
+            return zip?.ToLowerInvariant().Replace(" ", "") ?? "";
+        }
+
+        private static string NormalizeGender(string gender)
+        {
+            string lowerGender = gender?.ToLowerInvariant();
+            return (lowerGender == "m" || lowerGender == "f") ? lowerGender : "";
         }
     }
 }
