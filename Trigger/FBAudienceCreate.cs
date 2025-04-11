@@ -11,6 +11,8 @@ using Azure.Storage.Blobs;
 
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Azure.Storage.Queues;
+using System.Text;
 
 namespace Trigger
 {
@@ -138,6 +140,40 @@ namespace Trigger
 
 
                 log.LogInformation($"Populate completed for audience {payload.AudienceId}. num_received={audienceUpdates["num_received"]}, invalid={audienceUpdates["num_invalid_entries"]}");
+
+                // +++ START: Enqueue message for status check +++
+                try
+                {
+                    string statusQueueName = "status-check-queue";
+                    QueueClient statusQueueClient = new QueueClient(storageConnectionString, statusQueueName);
+                    await statusQueueClient.CreateIfNotExistsAsync();
+
+                    int expectedSize = (int)audienceUpdates["num_received"] - (int)audienceUpdates["num_invalid_entries"];
+                    // Ensure expectedSize is not negative, though it shouldn't be if logic is correct
+                    expectedSize = Math.Max(0, expectedSize);
+
+                    var statusPayload = new StatusCheckPayload
+                    {
+                        AudienceId = payload.AudienceId,
+                        AudienceName = payload.AudienceName,
+                        UserEmail = payload.UserEmail,
+                        ExpectedSize = expectedSize
+                    };
+
+                    string statusJson = JsonConvert.SerializeObject(statusPayload);
+                    // Use SendMessageAsync overload with visibilityTimeout
+                    TimeSpan delay = TimeSpan.FromMinutes(150); // 150 minutes delay
+                    await statusQueueClient.SendMessageAsync(Convert.ToBase64String(Encoding.UTF8.GetBytes(statusJson)), visibilityTimeout: delay);
+
+                    log.LogInformation($"Enqueued status check message for Audience ID {payload.AudienceId} with a {delay.TotalMinutes}-minute delay.");
+                }
+                catch (Exception queueEx)
+                {
+                    log.LogError(queueEx, $"Failed to enqueue status check message for Audience ID {payload.AudienceId}.");
+                    // Decide if this error should be critical or just logged.
+                    // The main operation succeeded, so maybe just log it.
+                }
+                // +++ END: Enqueue message for status check +++
 
                 log.LogInformation("===== PopulateFacebookAudienceFunction END =====");
             }
