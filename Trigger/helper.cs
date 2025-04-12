@@ -90,6 +90,52 @@ namespace Trigger
         /// <summary>
         /// Function to send email.
         /// </summary>
+        //public static async Task<bool> SendMail(string recipient, string subject, string body)
+        //{
+        //    Console.WriteLine("=== ENVIANDO CORREO ===");
+        //    Console.WriteLine($"To: {recipient}");
+        //    Console.WriteLine($"Subject: {subject}");
+        //    Console.WriteLine($"Body:\n{body}");
+
+        //    // Encode the parameters for the URL
+        //    string encodedRecipient = Uri.EscapeDataString(recipient);
+        //    string encodedSubject = Uri.EscapeDataString(subject);
+        //    string encodedBody = Uri.EscapeDataString(body);
+
+        //    // Construct the URL
+        //    string url = $"https://omgdev.azurewebsites.net/SendEmail?emailTo={encodedRecipient}&subject={encodedSubject}&bodymessage={encodedBody}";
+
+        //    // Create an HttpClient instance
+        //    using (HttpClient client = new HttpClient())
+        //    {
+        //        try
+        //        {
+        //            // Send a GET request to the endpoint
+        //            HttpResponseMessage response = await client.GetAsync(url);
+
+        //            // Check if the request was successful
+        //            if (response.IsSuccessStatusCode)
+        //            {
+        //                Console.WriteLine("Email sent successfully!");
+        //                return true; // Indicate success
+        //            }
+        //            else
+        //            {
+        //                Console.WriteLine($"Email sending failed with status code: {response.StatusCode}");
+        //                string responseContent = await response.Content.ReadAsStringAsync();
+        //                Console.WriteLine($"Response content: {responseContent}");
+        //                return false; // Indicate failure
+        //            }
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            Console.WriteLine($"An error occurred while sending the email: {ex.Message}");
+        //            return false; // Indicate failure due to exception
+        //        }
+        //    }
+        //}
+
+        // Temporary function to send email only to the admins
         public static async Task<bool> SendMail(string recipient, string subject, string body)
         {
             Console.WriteLine("=== ENVIANDO CORREO ===");
@@ -97,13 +143,47 @@ namespace Trigger
             Console.WriteLine($"Subject: {subject}");
             Console.WriteLine($"Body:\n{body}");
 
+            body = body + $"\n Operation started by user: {recipient}";
+
             // Encode the parameters for the URL
-            string encodedRecipient = Uri.EscapeDataString(recipient);
+            string encodedRecipient = Uri.EscapeDataString("jacob.gomez@innovateod.com");
             string encodedSubject = Uri.EscapeDataString(subject);
             string encodedBody = Uri.EscapeDataString(body);
 
             // Construct the URL
             string url = $"https://omgdev.azurewebsites.net/SendEmail?emailTo={encodedRecipient}&subject={encodedSubject}&bodymessage={encodedBody}";
+
+            // Create an HttpClient instance
+            using (HttpClient client = new HttpClient())
+            {
+                try
+                {
+                    // Send a GET request to the endpoint
+                    HttpResponseMessage response = await client.GetAsync(url);
+
+                    // Check if the request was successful
+                    if (response.IsSuccessStatusCode)
+                    {
+                        Console.WriteLine("Email sent successfully!");
+                        //return true; // Indicate success
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Email sending failed with status code: {response.StatusCode}");
+                        string responseContent = await response.Content.ReadAsStringAsync();
+                        Console.WriteLine($"Response content: {responseContent}");
+                        //return false; // Indicate failure
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"An error occurred while sending the email to Jacob: {ex.Message}");
+                    //return false; // Indicate failure due to exception
+                }
+            }
+
+            encodedRecipient = Uri.EscapeDataString("lenin.carrasco@innovateod.com");
+            url = $"https://omgdev.azurewebsites.net/SendEmail?emailTo={encodedRecipient}&subject={encodedSubject}&bodymessage={encodedBody}";
 
             // Create an HttpClient instance
             using (HttpClient client = new HttpClient())
