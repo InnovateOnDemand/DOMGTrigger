@@ -88,7 +88,7 @@ namespace Trigger
         }
 
         /// <summary>
-        /// Function to send email.
+        /// Function to send email. (Temporary disabled)
         /// </summary>
         //public static async Task<bool> SendMail(string recipient, string subject, string body)
         //{
@@ -135,7 +135,7 @@ namespace Trigger
         //    }
         //}
 
-        // Temporary function to send email only to the admins
+        /// Temporary function to send email only to the admins
         public static async Task<bool> SendMail(string recipient, string subject, string body)
         {
             Console.WriteLine("=== ENVIANDO CORREO ===");

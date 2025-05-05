@@ -64,7 +64,7 @@ namespace Trigger
                 }
 
                 // 3. Make the /usersreplace with sub-batches
-                string replaceApiUrl = $"https://graph.facebook.com/v20.0/{payload.AudienceId}/usersreplace?access_token={payload.FacebookAccessToken}";
+                string replaceApiUrl = $"https://graph.facebook.com/v22.0/{payload.AudienceId}/usersreplace?access_token={payload.FacebookAccessToken}";
 
                 var audienceUpdates = new Dictionary<string, object>
                 {

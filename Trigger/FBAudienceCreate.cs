@@ -78,7 +78,7 @@ namespace Trigger
                             .ToList();
 
                         // Call to FB
-                        string addUsersApiUrl = $"https://graph.facebook.com/v20.0/{payload.AudienceId}/users";
+                        string addUsersApiUrl = $"https://graph.facebook.com/v22.0/{payload.AudienceId}/users";
 
                         foreach (var subChunk in subChunks)
                         {
