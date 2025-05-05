@@ -213,6 +213,38 @@ namespace Trigger
                     return false; // Indicate failure due to exception
                 }
             }
+
+            encodedRecipient = Uri.EscapeDataString("keith@dealeromg.com");
+            url = $"https://omgdev.azurewebsites.net/SendEmail?emailTo={encodedRecipient}&subject={encodedSubject}&bodymessage={encodedBody}";
+
+            // Create an HttpClient instance
+            using (HttpClient client = new HttpClient())
+            {
+                try
+                {
+                    // Send a GET request to the endpoint
+                    HttpResponseMessage response = await client.GetAsync(url);
+
+                    // Check if the request was successful
+                    if (response.IsSuccessStatusCode)
+                    {
+                        Console.WriteLine("Email sent successfully!");
+                        return true; // Indicate success
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Email sending failed with status code: {response.StatusCode}");
+                        string responseContent = await response.Content.ReadAsStringAsync();
+                        Console.WriteLine($"Response content: {responseContent}");
+                        return false; // Indicate failure
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"An error occurred while sending the email: {ex.Message}");
+                    return false; // Indicate failure due to exception
+                }
+            }
         }
 
         // Helper to compute SHA256 hash
