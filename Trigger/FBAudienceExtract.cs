@@ -96,7 +96,7 @@ namespace Trigger
                   max(E.EMAIL1) as email1, 
                   max(E.EMAIL2) as email2, 
                   max(E.EMAIL3) as email3, 
-                  max(C.PHONE) as phone1, 
+                  max(C.PHONE1) as phone1, 
                   max(C.PHONE2) as phone2, 
                   max(C.PHONE3) as phone3, 
                   max(C.FNAME) as fn, 
