@@ -29,8 +29,7 @@ namespace Trigger
             try
             {
                 // 2. Extracting data from BigQuery
-                var customerData = GetCustomerDataFromBigQuery(
-                    payload.Sql, payload.SqlSales, payload.SqlService, log);
+                var customerData = GetCustomerDataFromBigQuery(payload.Sql, log);
                 if (customerData.Count == 0)
                 {
                     log.LogInformation("No data found from BigQuery. Exiting function...");
@@ -52,8 +51,7 @@ namespace Trigger
                     log.LogInformation("No valid blobs created. Possibly no data. Exiting function...");
                     return;
                 }
-                // 4. Enqueue message for the Function "Populate" or "Replace"
-                //    according to IsReplace
+                // 4. Enqueue message for the Function "Populate" or "Replace", according to IsReplace
                 string nextQueueName = payload.IsReplace ? "replace-queue" : "populate-queue";
                 QueueClient queueClient = new QueueClient(storageConnectionString, nextQueueName);
                 await queueClient.CreateIfNotExistsAsync();
@@ -81,8 +79,7 @@ namespace Trigger
             }
         }
 
-        private static List<Dictionary<string, object>> GetCustomerDataFromBigQuery(
-            string sql, string sqlSales, string sqlService, ILogger log)
+        private static List<Dictionary<string, object>> GetCustomerDataFromBigQuery(string sql, ILogger log)
         {
             log.LogInformation("Extracting data from BigQuery...");
             // Combining 'sql', 'sqlSales', 'sqlService' if needed.
@@ -90,46 +87,17 @@ namespace Trigger
             string BQprojectName = Environment.GetEnvironmentVariable("BigQueryProjectName");
             string BQdatasetName = Environment.GetEnvironmentVariable("BigQueryDatasetName");
 
-            // 1. Building query
-            string query = $@"
-                SELECT 
-                  max(E.EMAIL1) as email1, 
-                  max(E.EMAIL2) as email2, 
-                  max(E.EMAIL3) as email3, 
-                  max(C.PHONE1) as phone1, 
-                  max(C.PHONE2) as phone2, 
-                  max(C.PHONE3) as phone3, 
-                  max(C.FNAME) as fn, 
-                  max(C.LNAME) as ln, 
-                  max(C.ZIP) as zip, 
-                  max(C.CITY) as ct, 
-                  max(C.STATE) as st,
-                  max(C.DOB) as dob, 
-                  max(C.GENDER) as gen, 
-                  max(C.AGE) as age, 
-                  left(max(C.DOB),4) as doby, 
-                  '' as uid,  
-                  '' as madid, 
-                  'US' as country
-                FROM `{BQprojectName}.{BQdatasetName}.auto` as A 
-                inner join `{BQprojectName}.{BQdatasetName}.email` as E ON A.PID = E.PID 
-                inner join `{BQprojectName}.{BQdatasetName}.consumer` as C on C.PID = A.PID 
-                WHERE 1=1
-                {sql}
-                group by c.pid
-            ";
-
-            // 2. Credentials            
+            // 1. Credentials            
             string jsonCreds = Environment.GetEnvironmentVariable("GOOGLE_CREDENTIALS_JSON");
             var credential = GoogleCredential.FromJson(jsonCreds);
 
-            // 3. Creating cliente
+            // 2. Creating cliente
             var client = BigQueryClient.Create(BQprojectName, credential);
 
-            // 4. Running query
-            BigQueryResults results = client.ExecuteQuery(query, parameters: null);
+            // 3. Running query
+            BigQueryResults results = client.ExecuteQuery(sql, parameters: null);
 
-            // 5. Mapping to List<Dictionary<string, object>>
+            // 4. Mapping to List<Dictionary<string, object>>
             var customerData = new List<Dictionary<string, object>>();
             foreach (var row in results)
             {
@@ -148,13 +116,14 @@ namespace Trigger
                     { "st", row["st"]?.ToString() },
                     { "country", row["country"]?.ToString() },
                     { "doby", row["doby"]?.ToString() },
-                    { "gen", row["gen"]?.ToString() }
+                    { "gen", row["gen"]?.ToString() },
+                    { "age", row["age"]?.ToString() }
                 };
                 customerData.Add(dict);
             }
 
             return customerData;
-        }
+        }        
 
         private static async Task<List<string>> SaveCustomerDataToBlobAsync(
             string audienceId,
@@ -209,8 +178,6 @@ namespace Trigger
         public string AudienceId { get; set; }
         public string AudienceName { get; set; }
         public string Sql { get; set; }
-        public string SqlSales { get; set; }
-        public string SqlService { get; set; }
         public string FacebookAccessToken { get; set; }
         public bool IsReplace { get; set; }
         public string ContainerName { get; set; }
