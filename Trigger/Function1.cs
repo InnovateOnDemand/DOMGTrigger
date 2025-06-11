@@ -30,7 +30,7 @@ namespace Trigger
           }
 
           [FunctionName("Function1")]
-          public static async Task Run([TimerTrigger("0 */10 14-16 * * *")] TimerInfo myTimer, ILogger log)          
+          public static async Task Run([TimerTrigger("0 */10 13-15 * * *")] TimerInfo myTimer, ILogger log)          
           {
             log.LogInformation($"Upload process starts at {DateTime.Now.ToString("hh:mm:ss")}...");
             try
