@@ -1,0 +1,15 @@
+{
+  "generatedBy": "Microsoft.NET.Sdk.Functions.Generator-4.6.0",
+  "configurationSource": "attributes",
+  "bindings": [
+    {
+      "type": "queueTrigger",
+      "connection": "AzureWebJobsStorage",
+      "queueName": "replace-queue",
+      "name": "message"
+    }
+  ],
+  "disabled": false,
+  "scriptFile": "../bin/Trigger.dll",
+  "entryPoint": "Trigger.FBAudienceReplace.RunQueue"
+}
