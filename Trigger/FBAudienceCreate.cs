@@ -29,12 +29,39 @@ namespace Trigger
         {
             log.LogInformation("===== PopulateFacebookAudienceFunction START =====");
 
-            var payload = JsonConvert.DeserializeObject<PopulateAudiencePayload>(message);
+            // Decode message from Base64 if needed
+            string jsonMessage = message;
+            try
+            {
+                byte[] data = Convert.FromBase64String(message);
+                jsonMessage = Encoding.UTF8.GetString(data);
+                log.LogInformation("Message decoded from Base64");
+            }
+            catch
+            {
+                log.LogInformation("Message is not Base64 encoded, using as-is");
+            }
+
+            var payload = JsonConvert.DeserializeObject<PopulateAudiencePayload>(jsonMessage);
+            
+            // Validate payload
+            if (payload == null || string.IsNullOrEmpty(payload.AudienceId))
+            {
+                log.LogError("Invalid or null payload received. Cannot process.");
+                throw new ArgumentException("Payload is null or missing AudienceId");
+            }
+            
+            log.LogInformation($"Processing audience: {payload.AudienceId} - {payload.AudienceName}");
 
             try
             {
                 // 1. Connect to the Storage
                 string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
+                if (string.IsNullOrEmpty(storageConnectionString))
+                {
+                    log.LogError("ERROR: AzureWebJobsStorage environment variable is not set");
+                    throw new InvalidOperationException("Missing AzureWebJobsStorage configuration");
+                }
                 BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
                 BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(payload.ContainerName);
 
@@ -77,8 +104,8 @@ namespace Trigger
                             .Select(g => g.Select(x => x.c).ToList())
                             .ToList();
 
-                        // Call to FB
-                        string addUsersApiUrl = $"https://graph.facebook.com/v22.0/{payload.AudienceId}/users";
+                        // Call to FB API v24.0
+                        string addUsersApiUrl = $"https://graph.facebook.com/v24.0/{payload.AudienceId}/users";
 
                         foreach (var subChunk in subChunks)
                         {

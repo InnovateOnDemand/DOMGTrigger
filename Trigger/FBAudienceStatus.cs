@@ -65,16 +65,29 @@ namespace Trigger
             string message,
             ILogger log)
         {
-            log.LogInformation($"===== CheckAudienceStatusFunction START for message: {message} =====");
+            log.LogInformation($"===== CheckAudienceStatusFunction START =====");
+
+            // Decode message from Base64 if needed
+            string jsonMessage = message;
+            try
+            {
+                byte[] data = Convert.FromBase64String(message);
+                jsonMessage = Encoding.UTF8.GetString(data);
+                log.LogInformation("Message decoded from Base64");
+            }
+            catch
+            {
+                log.LogInformation("Message is not Base64 encoded, using as-is");
+            }
 
             StatusCheckPayload payload = null;
             try
             {
-                payload = JsonConvert.DeserializeObject<StatusCheckPayload>(message);
+                payload = JsonConvert.DeserializeObject<StatusCheckPayload>(jsonMessage);
                 if (payload == null || string.IsNullOrEmpty(payload.AudienceId))
                 {
                     log.LogError("Invalid payload received in status-check-queue. Missing AudienceId.");
-                    return; // Cannot proceed without Audience ID
+                    throw new ArgumentException("Payload is null or missing AudienceId");
                 }
 
                 log.LogInformation($"Checking status for Audience ID: {payload.AudienceId}, Name: {payload.AudienceName}, Expected Size: {payload.ExpectedSize}");
