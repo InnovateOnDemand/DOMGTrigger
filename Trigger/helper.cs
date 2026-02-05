@@ -14,6 +14,12 @@ namespace Trigger
 {
     public static class helper
     {
+        public static string GetFacebookApiVersion()
+        {
+            var version = Environment.GetEnvironmentVariable("FacebookApiVersion");
+            return string.IsNullOrWhiteSpace(version) ? "v23.0" : version.Trim();
+        }
+
         /// <summary>
         /// Converts the list of dictionaries into the structure expected by Facebook.
         /// </summary>

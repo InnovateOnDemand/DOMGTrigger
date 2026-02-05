@@ -77,8 +77,8 @@ namespace Trigger
                             .Select(g => g.Select(x => x.c).ToList())
                             .ToList();
 
-                        // Call to FB
-                        string addUsersApiUrl = $"https://graph.facebook.com/v22.0/{payload.AudienceId}/users";
+                        var fbApiVersion = helper.GetFacebookApiVersion();
+                        string addUsersApiUrl = $"https://graph.facebook.com/{fbApiVersion}/{payload.AudienceId}/users";
 
                         foreach (var subChunk in subChunks)
                         {

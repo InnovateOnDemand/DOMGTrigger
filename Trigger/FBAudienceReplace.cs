@@ -63,8 +63,9 @@ namespace Trigger
                     return;
                 }
 
+                var fbApiVersion = helper.GetFacebookApiVersion();
                 // 3. Make the /usersreplace with sub-batches
-                string replaceApiUrl = $"https://graph.facebook.com/v22.0/{payload.AudienceId}/usersreplace?access_token={payload.FacebookAccessToken}";
+                string replaceApiUrl = $"https://graph.facebook.com/{fbApiVersion}/{payload.AudienceId}/usersreplace?access_token={payload.FacebookAccessToken}";
 
                 var audienceUpdates = new Dictionary<string, object>
                 {
