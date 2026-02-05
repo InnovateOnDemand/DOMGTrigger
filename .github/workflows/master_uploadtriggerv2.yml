@@ -66,7 +66,6 @@ jobs:
 
           parsed = urlparse(publish_url)
           host = parsed.hostname
-          remote_path = parsed.path or '/site/wwwroot'
           if not host:
             raise SystemExit('Invalid FTP publishUrl')
 
@@ -79,7 +78,7 @@ jobs:
             'lftp',
             '-e',
             'set ssl:verify-certificate no; set ftp:ssl-force true; set ssl:check-hostname no; '
-            f'mirror -R --delete --only-newer {output_dir} {remote_path}; bye',
+            f'mirror -R --delete --only-newer {output_dir} .; ls -la; bye',
             '-u', f'{username},{password}',
             f'ftps://{host}'
           ]
