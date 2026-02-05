@@ -67,7 +67,7 @@ jobs:
           if not os.path.exists(host_json):
             raise SystemExit('host.json not found in publish output')
 
-          zip_name = os.path.join(output_dir, 'output.zip')
+          zip_name = 'output.zip'
           zip_result = subprocess.run(['zip', '-r', zip_name, '.'], cwd=output_dir)
           if zip_result.returncode != 0:
             raise SystemExit('zip failed')
@@ -76,7 +76,7 @@ jobs:
             'curl', '-sS', '-w', '%{http_code}', '-o', '/tmp/zipdeploy.out',
             '-X', 'POST', '-u', f'{username}:{password}',
             '-H', 'Content-Type: application/zip',
-            '--data-binary', f'@{zip_name}', deploy_url
+            '--data-binary', f'@{os.path.join(output_dir, zip_name)}', deploy_url
           ]
           result = subprocess.run(curl_cmd, capture_output=True, text=True)
           http_code = (result.stdout or '').strip()
