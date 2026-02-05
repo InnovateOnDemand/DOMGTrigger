@@ -33,10 +33,11 @@ jobs:
           dotnet publish --configuration Release --output ./output
           popd
       
-      - name: 'Run Azure Functions Action'
+      - name: 'Deploy using Publish Profile'
         uses: Azure/functions-action@v1
-        id: fa
         with:
           app-name: 'UploadTriggerV2'
           package: '${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/output'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_V2 }}
+          scm-do-build-during-deployment: false
+          enable-oryx-build: false
