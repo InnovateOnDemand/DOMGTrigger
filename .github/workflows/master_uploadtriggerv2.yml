@@ -33,6 +33,12 @@ jobs:
           dotnet publish --configuration Release --output ./output
           popd
 
+      - name: 'Install lftp'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lftp
+
       - name: 'Deploy to Azure Function App'
         shell: bash
         run: |
@@ -40,52 +46,44 @@ jobs:
           import os
           import subprocess
           import xml.etree.ElementTree as ET
+          from urllib.parse import urlparse
 
           profile_xml = """${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_V2 }}"""
           root = ET.fromstring(profile_xml)
 
           profile = None
           for p in root.findall('publishProfile'):
-            if p.get('publishMethod') == 'ZipDeploy':
+            if p.get('publishMethod') == 'FTP':
               profile = p
               break
 
           if profile is None:
-            raise SystemExit('ZipDeploy publish profile not found')
+            raise SystemExit('FTP publish profile not found')
 
           publish_url = profile.get('publishUrl')
           username = profile.get('userName')
           password = profile.get('userPWD')
 
-          deploy_url = publish_url
-          if not deploy_url.startswith('https://'):
-            deploy_url = f'https://{deploy_url}'
-          deploy_url = f'{deploy_url}/api/zipdeploy'
+          parsed = urlparse(publish_url)
+          host = parsed.hostname
+          remote_path = parsed.path or '/site/wwwroot'
+          if not host:
+            raise SystemExit('Invalid FTP publishUrl')
 
-          output_dir = './Trigger/output'
+          output_dir = os.path.abspath('./Trigger/output')
           host_json = os.path.join(output_dir, 'host.json')
           if not os.path.exists(host_json):
             raise SystemExit('host.json not found in publish output')
 
-          zip_name = 'output.zip'
-          zip_result = subprocess.run(['zip', '-r', zip_name, '.'], cwd=output_dir)
-          if zip_result.returncode != 0:
-            raise SystemExit('zip failed')
-
-          curl_cmd = [
-            'curl', '-sS', '-w', '%{http_code}', '-o', '/tmp/zipdeploy.out',
-            '-X', 'POST', '-u', f'{username}:{password}',
-            '-H', 'Content-Type: application/zip',
-            '--data-binary', f'@{os.path.join(output_dir, zip_name)}', deploy_url
+          lftp_cmd = [
+            'lftp',
+            '-e',
+            'set ssl:verify-certificate no; set ftp:ssl-force true; set ssl:check-hostname no; '
+            f'mirror -R --delete --only-newer {output_dir} {remote_path}; bye',
+            '-u', f'{username},{password}',
+            f'ftps://{host}'
           ]
-          result = subprocess.run(curl_cmd, capture_output=True, text=True)
-          http_code = (result.stdout or '').strip()
-          print(f'ZipDeploy HTTP status: {http_code}')
-          if http_code not in {'200', '201', '202'}:
-            try:
-              with open('/tmp/zipdeploy.out', 'r', encoding='utf-8') as fh:
-                print(fh.read())
-            except Exception:
-              pass
-            raise SystemExit('zipdeploy failed')
+          result = subprocess.run(lftp_cmd)
+          if result.returncode != 0:
+            raise SystemExit('ftp deploy failed')
           EOF
