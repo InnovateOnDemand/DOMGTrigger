@@ -69,6 +69,8 @@ jobs:
           if not host:
             raise SystemExit('Invalid FTP publishUrl')
 
+          remote_path = parsed.path or '/site/wwwroot'
+
           output_dir = os.path.abspath('./Trigger/output')
           host_json = os.path.join(output_dir, 'host.json')
           if not os.path.exists(host_json):
@@ -78,7 +80,7 @@ jobs:
             'lftp',
             '-e',
             'set ssl:verify-certificate no; set ftp:ssl-force true; set ssl:check-hostname no; '
-            f'mirror -R --delete --only-newer {output_dir} .; ls -la; bye',
+            f'mirror -R --delete --only-newer {output_dir} {remote_path}; ls -la {remote_path}; bye',
             '-u', f'{username},{password}',
             f'ftps://{host}'
           ]
