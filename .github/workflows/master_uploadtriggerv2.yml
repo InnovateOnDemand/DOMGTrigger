@@ -41,36 +41,44 @@ jobs:
           import subprocess
           import os
           
-          # Write publish profile from secret to temp file
+          # Parse publish profile
           profile_xml = """${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_V2 }}"""
-          
-          # Parse XML
           root = ET.fromstring(profile_xml)
-          
-          # Get the first publishProfile (MSDeploy)
           profile = root.find('publishProfile')
           
           if profile:
+              # Extract credentials
               publish_url = profile.get('publishUrl')
               username = profile.get('userName')
               password = profile.get('userPWD')
               
-              print(f"Deploy URL: {publish_url}")
+              # Ensure https:// prefix
+              if not publish_url.startswith('https://'):
+                  deploy_url = f'https://{publish_url}/api/zipdeploy'
+              else:
+                  deploy_url = f'{publish_url}/api/zipdeploy'
+              
+              print(f"Deploy URL: {deploy_url}")
               print(f"Username: {username[:10]}...")
               
-              # Create zip file
-              result = subprocess.run(['zip', '-r', './Trigger/output.zip', '.'], 
+              # Create zip from output directory
+              result = subprocess.run(['zip', '-r', 'output.zip', '.'], 
                                     cwd='./Trigger/output',
                                     capture_output=True, text=True)
-              print(f"Zip result: {result.returncode}")
+              if result.returncode != 0:
+                  print(f"Zip failed: {result.stderr}")
+                  exit(1)
+              print(f"Zip created successfully")
               
-              # Deploy using WebDeploy
-              deploy_cmd = ['curl', '-X', 'POST', '-u', f'{username}:{password}', 
-                          '--data-binary', '@./Trigger/output.zip', 
-                          f'{publish_url}/api/zipdeploy']
+              # Deploy using curl
+              deploy_cmd = ['curl', '-X', 'POST', 
+                          '-u', f'{username}:{password}',
+                          '--data-binary', '@Trigger/output/output.zip',
+                          deploy_url]
+              
               result = subprocess.run(deploy_cmd, capture_output=True, text=True)
-              print(f"Deploy status: {result.returncode}")
-              print(result.stdout)
+              print(f"Deploy status code: {result.returncode}")
+              print(f"Response: {result.stdout}")
               if result.stderr:
-                  print(result.stderr)
+                  print(f"Error: {result.stderr}")
           EOF
