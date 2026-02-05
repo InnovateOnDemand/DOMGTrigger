@@ -33,20 +33,20 @@ jobs:
           dotnet publish --configuration Release --output ./output
           popd
 
-      - name: 'Install Azure Functions Core Tools'
+      - name: 'Deploy using WebDeploy'
         shell: bash
         run: |
-          curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
-          sudo install -o root -g root -m 644 microsoft.gpg /etc/apt/trusted.gpg.d/
-          echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ focal main" | sudo tee /etc/apt/sources.list.d/azure-cli.list > /dev/null
-          sudo apt-get update
-          sudo apt-get install -y azure-functions-core-tools-4
-      
-      - name: 'Deploy to Azure Function App'
-        shell: bash
-        run: |
-          pushd '${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/output'
-          func azure functionapp publish UploadTriggerV2 --build local
-          popd
-        env:
-          AZURE_FUNCTIONAPP_PUBLISH_PROFILE: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_V2 }}
+          # Extract credentials from publish profile
+          PROFILE="${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_V2 }}"
+          PUBLISH_URL=$(echo "$PROFILE" | grep -oP 'publishUrl="\K[^"]+' | head -1)
+          USERNAME=$(echo "$PROFILE" | grep -oP 'userName="\K[^"]+' | head -1)
+          PASSWORD=$(echo "$PROFILE" | grep -oP 'userPWD="\K[^"]+' | head -1)
+          
+          echo "Deploying to: $PUBLISH_URL"
+          
+          # Create zip file
+          cd '${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/output'
+          zip -r ../output.zip .
+          
+          # Deploy using WebDeploy
+          curl -X POST -u "$USERNAME:$PASSWORD" --data-binary @../output.zip "$PUBLISH_URL/api/zipdeploy"
