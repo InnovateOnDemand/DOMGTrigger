@@ -24,8 +24,31 @@ namespace Trigger
             ILogger log)
         {
             log.LogInformation("===== ExtractBigQueryDataFunction START =====");
-            // 1. Deserializing the message
-            var payload = JsonConvert.DeserializeObject<ExtractAudiencePayload>(message);
+            
+            // 1. Decode message from Base64 if needed
+            string jsonMessage = message;
+            try
+            {
+                byte[] data = Convert.FromBase64String(message);
+                jsonMessage = Encoding.UTF8.GetString(data);
+                log.LogInformation("Message decoded from Base64");
+            }
+            catch
+            {
+                log.LogInformation("Message is not Base64 encoded, using as-is");
+            }
+            
+            // 2. Deserializing the message
+            var payload = JsonConvert.DeserializeObject<ExtractAudiencePayload>(jsonMessage);
+            
+            // Validate payload
+            if (payload == null || string.IsNullOrEmpty(payload.AudienceId))
+            {
+                log.LogError("Invalid or null payload received. Cannot process.");
+                throw new ArgumentException("Payload is null or missing AudienceId");
+            }
+            
+            log.LogInformation($"Processing audience: {payload.AudienceId} - {payload.AudienceName}");
             try
             {
                 // 2. Extracting data from BigQuery
@@ -37,9 +60,17 @@ namespace Trigger
                 }
                 // 3. Saving data in Blob
                 string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
+                if (string.IsNullOrEmpty(storageConnectionString))
+                {
+                    log.LogError("ERROR: AzureWebJobsStorage environment variable is not set");
+                    throw new InvalidOperationException("Missing AzureWebJobsStorage configuration");
+                }
+                
                 string containerName = string.IsNullOrEmpty(payload.ContainerName)
                                         ? "fb-audiences-data"
                                         : payload.ContainerName;
+                log.LogInformation($"Uploading data to Blob container: {containerName}");
+                
                 var blobPaths = await SaveCustomerDataToBlobAsync(
                     payload.AudienceId,
                     customerData,
@@ -53,6 +84,8 @@ namespace Trigger
                 }
                 // 4. Enqueue message for the Function "Populate" or "Replace", according to IsReplace
                 string nextQueueName = payload.IsReplace ? "replace-queue" : "populate-queue";
+                log.LogInformation($"Enqueueing message to: {nextQueueName}");
+                
                 QueueClient queueClient = new QueueClient(storageConnectionString, nextQueueName);
                 await queueClient.CreateIfNotExistsAsync();
                 var nextPayload = new PopulateQueuePayload
@@ -67,14 +100,22 @@ namespace Trigger
                 string nextJson = JsonConvert.SerializeObject(nextPayload);
                 string nextJsonBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(nextJson));
                 await queueClient.SendMessageAsync(nextJsonBase64);
-                log.LogInformation($"Message enqueued to {nextQueueName}. Done extraction.");
+                log.LogInformation($"Message enqueued to {nextQueueName}. Extraction completed successfully.");
             }
             catch (Exception ex)
             {
+                log.LogError($"ERROR in ExtractBigQueryDataFunction: {ex.Message}");
+                log.LogError($"StackTrace: {ex.StackTrace}");
+                
                 // Notify the error by email
-                await helper.SendMail(payload.UserEmail,
-                    "Error the extracting Customer data for Facebook Audience",
-                    $"An error happened while extracting the data for the FB Audience: {payload.AudienceId} - {payload.AudienceName}" +
+                string userEmail = payload?.UserEmail ?? "fernando.pavia@innovateod.com";
+                string audienceInfo = payload != null 
+                    ? $"{payload.AudienceId} - {payload.AudienceName}" 
+                    : "Unknown (failed to deserialize payload)";
+                
+                await helper.SendMail(userEmail,
+                    "Error extracting Customer data for Facebook Audience",
+                    $"An error happened while extracting the data for the FB Audience: {audienceInfo}" +
                     $"\nError message: {ex.Message}\nStackTrace:\n{ex.StackTrace}");
             }
         }
@@ -82,47 +123,77 @@ namespace Trigger
         private static List<Dictionary<string, object>> GetCustomerDataFromBigQuery(string sql, ILogger log)
         {
             log.LogInformation("Extracting data from BigQuery...");
-            // Combining 'sql', 'sqlSales', 'sqlService' if needed.
-            // E.g.: asumming `sql` is the main WHERE. 
+            
+            // Validate environment variables
             string BQprojectName = Environment.GetEnvironmentVariable("BigQueryProjectName");
             string BQdatasetName = Environment.GetEnvironmentVariable("BigQueryDatasetName");
-
-            // 1. Credentials            
             string jsonCreds = Environment.GetEnvironmentVariable("GOOGLE_CREDENTIALS_JSON");
-            var credential = GoogleCredential.FromJson(jsonCreds);
-
-            // 2. Creating cliente
-            var client = BigQueryClient.Create(BQprojectName, credential);
-
-            // 3. Running query
-            BigQueryResults results = client.ExecuteQuery(sql, parameters: null);
-
-            // 4. Mapping to List<Dictionary<string, object>>
-            var customerData = new List<Dictionary<string, object>>();
-            foreach (var row in results)
+            
+            if (string.IsNullOrEmpty(BQprojectName))
             {
-                var dict = new Dictionary<string, object>
-                {
-                    { "email1", row["email1"]?.ToString() },
-                    { "email2", row["email2"]?.ToString() },
-                    { "email3", row["email3"]?.ToString() },
-                    { "phone1", row["phone1"]?.ToString() },
-                    { "phone2", row["phone2"]?.ToString() },
-                    { "phone3", row["phone3"]?.ToString() },
-                    { "fn", row["fn"]?.ToString() },
-                    { "ln", row["ln"]?.ToString() },
-                    { "zip", row["zip"]?.ToString() },
-                    { "ct", row["ct"]?.ToString() },
-                    { "st", row["st"]?.ToString() },
-                    { "country", row["country"]?.ToString() },
-                    { "doby", row["doby"]?.ToString() },
-                    { "gen", row["gen"]?.ToString() },
-                    { "age", row["age"]?.ToString() }
-                };
-                customerData.Add(dict);
+                log.LogError("ERROR: BigQueryProjectName environment variable is not set");
+                throw new InvalidOperationException("Missing BigQueryProjectName configuration");
             }
+            if (string.IsNullOrEmpty(BQdatasetName))
+            {
+                log.LogError("ERROR: BigQueryDatasetName environment variable is not set");
+                throw new InvalidOperationException("Missing BigQueryDatasetName configuration");
+            }
+            if (string.IsNullOrEmpty(jsonCreds))
+            {
+                log.LogError("ERROR: GOOGLE_CREDENTIALS_JSON environment variable is not set");
+                throw new InvalidOperationException("Missing Google credentials configuration");
+            }
+            
+            log.LogInformation($"Using BigQuery project: {BQprojectName}");
 
-            return customerData;
+            try
+            {
+                // 1. Credentials            
+                var credential = GoogleCredential.FromJson(jsonCreds);
+
+                // 2. Creating cliente
+                var client = BigQueryClient.Create(BQprojectName, credential);
+
+                // 3. Running query
+                log.LogInformation("Executing BigQuery...");
+                BigQueryResults results = client.ExecuteQuery(sql, parameters: null);
+
+                // 4. Mapping to List<Dictionary<string, object>>
+                var customerData = new List<Dictionary<string, object>>();
+                int rowCount = 0;
+                foreach (var row in results)
+                {
+                    var dict = new Dictionary<string, object>
+                    {
+                        { "email1", row["email1"]?.ToString() },
+                        { "email2", row["email2"]?.ToString() },
+                        { "email3", row["email3"]?.ToString() },
+                        { "phone1", row["phone1"]?.ToString() },
+                        { "phone2", row["phone2"]?.ToString() },
+                        { "phone3", row["phone3"]?.ToString() },
+                        { "fn", row["fn"]?.ToString() },
+                        { "ln", row["ln"]?.ToString() },
+                        { "zip", row["zip"]?.ToString() },
+                        { "ct", row["ct"]?.ToString() },
+                        { "st", row["st"]?.ToString() },
+                        { "country", row["country"]?.ToString() },
+                        { "doby", row["doby"]?.ToString() },
+                        { "gen", row["gen"]?.ToString() },
+                        { "age", row["age"]?.ToString() }
+                    };
+                    customerData.Add(dict);
+                    rowCount++;
+                }
+                log.LogInformation($"Successfully extracted {rowCount} rows from BigQuery");
+                return customerData;
+            }
+            catch (Exception ex)
+            {
+                log.LogError($"ERROR executing BigQuery: {ex.Message}");
+                log.LogError($"StackTrace: {ex.StackTrace}");
+                throw;
+            }
         }        
 
         private static async Task<List<string>> SaveCustomerDataToBlobAsync(

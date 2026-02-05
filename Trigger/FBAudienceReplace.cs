@@ -26,12 +26,39 @@ namespace Trigger
         {
             log.LogInformation("===== ReplaceFacebookAudienceFunction START =====");
 
-            var payload = JsonConvert.DeserializeObject<PopulateAudiencePayload>(message);
+            // Decode message from Base64 if needed
+            string jsonMessage = message;
+            try
+            {
+                byte[] data = Convert.FromBase64String(message);
+                jsonMessage = Encoding.UTF8.GetString(data);
+                log.LogInformation("Message decoded from Base64");
+            }
+            catch
+            {
+                log.LogInformation("Message is not Base64 encoded, using as-is");
+            }
+
+            var payload = JsonConvert.DeserializeObject<PopulateAudiencePayload>(jsonMessage);
+            
+            // Validate payload
+            if (payload == null || string.IsNullOrEmpty(payload.AudienceId))
+            {
+                log.LogError("Invalid or null payload received. Cannot process.");
+                throw new ArgumentException("Payload is null or missing AudienceId");
+            }
+            
+            log.LogInformation($"Processing audience: {payload.AudienceId} - {payload.AudienceName}");
 
             try
             {
                 // 1. Connecting to Blob
                 string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
+                if (string.IsNullOrEmpty(storageConnectionString))
+                {
+                    log.LogError("ERROR: AzureWebJobsStorage environment variable is not set");
+                    throw new InvalidOperationException("Missing AzureWebJobsStorage configuration");
+                }
                 BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
                 BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(payload.ContainerName);
 
@@ -63,8 +90,8 @@ namespace Trigger
                     return;
                 }
 
-                // 3. Make the /usersreplace with sub-batches
-                string replaceApiUrl = $"https://graph.facebook.com/v22.0/{payload.AudienceId}/usersreplace?access_token={payload.FacebookAccessToken}";
+                // 3. Make the /usersreplace with sub-batches (API v24.0)
+                string replaceApiUrl = $"https://graph.facebook.com/v24.0/{payload.AudienceId}/usersreplace?access_token={payload.FacebookAccessToken}";
 
                 var audienceUpdates = new Dictionary<string, object>
                 {
