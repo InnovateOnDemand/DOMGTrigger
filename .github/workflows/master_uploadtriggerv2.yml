@@ -38,6 +38,5 @@ jobs:
         id: fa
         with:
           app-name: 'UploadTriggerV2'
-          slot-name: 'Production'
           package: '${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/output'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_DFF1E2ABE12245EABD877A25C17480DE }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_V2 }}

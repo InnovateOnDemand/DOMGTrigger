@@ -1,39 +1,11 @@
-name: Build and deploy dotnet core app to Azure Function App - UploadTriggerV2
+name: Deprecated - legacy workflow (disabled)
 
 on:
-  push:
-    branches:
-      - master
   workflow_dispatch:
 
-env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # set this to the path to your web app project, defaults to the repository root
-  DOTNET_VERSION: '8.0.x' # Updated to .NET 8 LTS
-
 jobs:
-  build-and-deploy:
-    runs-on: windows-latest
+  noop:
+    runs-on: ubuntu-latest
     steps:
-      - name: 'Checkout GitHub Action'
-        uses: actions/checkout@v3
-
-      - name: Setup DotNet ${{ env.DOTNET_VERSION }} Environment
-        uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: 'Resolve Project Dependencies Using Dotnet'
-        shell: pwsh
-        run: |
-          pushd './${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/Trigger'
-          dotnet build --configuration Release --output ./output
-          popd
-
-      - name: 'Run Azure Functions Action'
-        uses: Azure/functions-action@v1
-        id: fa
-        with:
-          app-name: 'UploadTriggerV2'
-          slot-name: 'Production'
-          package: '${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/Trigger/output'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_DFF1E2ABE12245EABD877A25C17480DE }}
+      - name: Legacy workflow disabled
+        run: echo "This workflow is disabled. Use master_uploadtriggerv2.yml instead."
