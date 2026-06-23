@@ -4,8 +4,10 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using static System.Net.WebRequestMethods;
 using static Trigger.Function1;
@@ -77,24 +79,34 @@ namespace Trigger
                             log.LogInformation(logMessage);
                         }
 
-                        foreach (var dealer in dealers)
+                        var semaphore = new SemaphoreSlim(3);
+                        var tasks = dealers.Select(async dealer =>
                         {
-                            var url = $"{baseUrl}DataFiles/DataFileUpload?DataProviderID={dealer.dataProviderID}&dealerIds={dealer.dealerID}";
-
-                            HttpResponseMessage response = await client.PostAsJsonAsync(url, new { });
-
-                            if (response.StatusCode != HttpStatusCode.OK)
+                            await semaphore.WaitAsync();
+                            try
                             {
-                                log.LogError($"There was an error on the call");
+                                var url = $"{baseUrl}DataFiles/DataFileUpload?DataProviderID={dealer.dataProviderID}&dealerIds={dealer.dealerID}";
+
+                                HttpResponseMessage response = await client.PostAsJsonAsync(url, new { });
+
+                                if (response.StatusCode != HttpStatusCode.OK)
+                                {
+                                    log.LogError($"There was an error on the call for Dealer: {dealer.dealerID}");
+                                }
+                                else
+                                {
+                                    var stringRes = await response.Content.ReadAsStringAsync();
+                                    string logMessage = $"Upload Information Process called with result: {stringRes} for Dealer: {dealer.dealerID} and DataProvider: {dealer.dataProviderID} ";
+                                    await client.PostAsJsonAsync(logsUrl, new Log(logMessage));
+                                    log.LogInformation(logMessage);
+                                }
                             }
-                            else
+                            finally
                             {
-                                var stringRes = await response.Content.ReadAsStringAsync();
-                                string logMessage = $"Upload Information Process called with result: {stringRes} for Dealer: {dealer.dealerID} and DataProvider: {dealer.dataProviderID} ";
-                                await client.PostAsJsonAsync(logsUrl, new Log(logMessage));
-                                log.LogInformation(logMessage);
+                                semaphore.Release();
                             }
-                        }
+                        });
+                        await Task.WhenAll(tasks);
                     }
                     else
                     {
